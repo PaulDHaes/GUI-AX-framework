@@ -51,10 +51,9 @@ Traditional security reconnaissance is slow and limited by single-machine resour
                          │ HTTP/REST API
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              Axiom Bridge (Python/Flask)                     │
-│                                                              │
+│              Axiom Bridge (Python/Flask)                    │
+│                                                             │
 │  • REST API Server (Flask + CORS)                           │
-│  • File Watcher (watchdog) - imports/ directory             │
 │  • Result Parser (amass, nmap, nuclei, gowitness, etc.)     │
 │  • Data Store (JSON) - targets & fleet state                │
 │  • Axiom Command Executor (subprocess + zsh)                │
@@ -62,22 +61,23 @@ Traditional security reconnaissance is slow and limited by single-machine resour
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Axiom Framework                           │
-│                                                              │
+│                    Axiom Framework                          │
+│                                                             │
 │  • axiom-scan: Distribute scans across fleet                │
 │  • axiom-ls: List instance status                           │
 │  • axiom-exec: Execute commands on instances                │
 │  • axiom-power: Control instance power states               │
 │  • axiom-rm: Terminate instances                            │
+│  • ax update: update ax framework                           │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              Cloud Infrastructure (Fleet)                    │
-│                                                              │
-│  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐         │
-│  │ VM 1 │  │ VM 2 │  │ VM 3 │  │ ...  │  │ VM N │         │
-│  └──────┘  └──────┘  └──────┘  └──────┘  └──────┘         │
+│              Cloud Infrastructure (Fleet)                   │
+│                                                             │
+│  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐           │
+│  │ VM 1 │  │ VM 2 │  │ VM 3 │  │ ...  │  │ VM N │           │
+│  └──────┘  └──────┘  └──────┘  └──────┘  └──────┘           │
 │  AWS • Azure • DigitalOcean • Linode • GCP                  │
 └─────────────────────────────────────────────────────────────┘
 ```

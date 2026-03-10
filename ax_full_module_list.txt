@@ -1,0 +1,113 @@
+amass                   txt      /usr/bin/amass enum -df input -o output
+aquatone                dir      cat input | /usr/bin/aquatone -out output
+arjun                   txt      /usr/local/bin/arjun -i input -oT output
+asm                     dir      [
+  "cat input",
+  "| subfinder -json -o output/host.json",
+  "| jq --unbuffered -r '.host'",
+  "| dnsx -json -o output/dns.json",
+  "| jq --unbuffered -r '.host'",
+  "| httpx -json -o output/http.json",
+  "| jq --unbuffered -r '.url'"
+]
+assetfinder             txt      cat input | assetfinder --subs-only | tee output
+cero                    txt      docker run --rm -i --mount type=bind,source="$(pwd)",target=/data axiom/cero < input | tee output
+cngo                    txt      /home/op/go/bin/cngo -f input | tee output
+commix                  dir      docker run --rm -i --mount type=bind,source="$(pwd)",target=/data axiom/commix --batch -m /data/input --output-dir /data/output
+corsy                   txt      python3 /home/op/recon/Corsy/corsy.py -i input | tee output
+crlfuzz                 txt      /home/op/go/bin/crlfuzz -l input -o output
+crobat                  txt      /home/op/go/bin/crobat -s _target_ -u | tee output/_cleantarget_ (One-Shot)
+ctfr                    txt      python3 -u /home/op/recon/ctfr/ctfr.py -d _target_ -o output/_cleantarget_ (One-Shot)
+dalfox                  txt      /home/op/go/bin/dalfox file input -o output
+dirdar                  txt      cat input | /home/op/go/bin/dirdar -only-ok | tee output
+dnscewl                 txt      /usr/bin/DNSCewl --tL input -p /home/op/lists/permutations.txt --subs --no-color | tail -n +14 | tee output
+dnsgen                  txt      cat input | docker run --rm -i --mount type=bind,source="$(pwd)",target=/data axiom/dnsgen | tee output
+dnsrecon                dir      docker run -t --rm -i --mount type=bind,source="$(pwd)",target=/data axiom/dnsrecon -d _target_ -a -j /data/output/_cleantarget_ (One-Shot)
+dnsvalidator            txt      /usr/local/bin/dnsvalidator -tL input -o output
+dnsx                    txt      cat input | /home/op/go/bin/dnsx -r /home/op/lists/resolvers.txt -o output
+erlpopper-brute         txt      python3 /home/op/recon/ERLPopper/erl_brute_by_seed_interval.py input --processes 64 --output output --quiet
+exclude-cdn             txt      cat input | /home/op/go/bin/exclude-cdn | tee output
+exec                    txt      /bin/bash input | tee output
+feroxbuster             dir      /usr/bin/feroxbuster -u _target_ -w _wordlist_ -o output/_cleantarget_ (One-Shot)
+fff                     txt      cat input | /home/op/go/bin/fff | tee output
+fff                     dir      cat input | /home/op/go/bin/fff -S --output output
+ffuf                    csv      /home/op/go/bin/ffuf -w _wordlist_ -u _target_/FUZZ -of csv -o output/_cleantarget_ -ac (One-Shot)
+ffuf                    dir      /home/op/go/bin/ffuf -w _wordlist_ -u _target_/FUZZ -of all -o output/_cleantarget_ -ac (One-Shot)
+ffuf                    jsonl    /home/op/go/bin/ffuf -w _wordlist_ -u _target_/FUZZ -of json -o output/_cleantarget_ -ac (One-Shot)
+ffuf_base               txt      /home/op/go/bin/ffuf -w _wordlist_ -u _target_/FUZZ -o output/_cleantarget_  (One-Shot)
+ffuz                    csv      cat input | /home/op/bin/ffuz -s -o output
+findomain               txt      /usr/bin/findomain -q -f input -u output
+gau                     txt      cat input | /home/op/go/bin/gau --verbose --o output
+gauplus                 txt      cat input | /home/op/go/bin/gauplus -t 20 -subs -random-agent -o output
+github-endpoints        txt      /home/op/go/bin/github-endpoints -d _target_ -o output/_cleantarget_ (One-Shot)
+github-subdomains       txt      /home/op/go/bin/github-subdomains -d _target_ -o output/_cleantarget_ (One-Shot)
+gobuster-dir            txt      /usr/bin/gobuster dir -q -w input -o output -u 
+gobuster-dns            txt      /usr/bin/gobuster dns -q -w input -o output -d 
+gorgo                   csv      docker run -it --rm --mount type=bind,source="$(pwd)",target=/data axiom/gorgo -U usernames.txt -P passwords.txt -H /data/input --protocols ftp:21,ssh:22 --generate -o /data/output
+gospider                dir      cat input | /home/op/go/bin/gospider -S - --depth 3 -v -t 50 -c 3 -o output
+gospider_base           dir      cat input | /home/op/go/bin/gospider -S - -v -o output
+gowitness               dir      /home/op/go/bin/gowitness scan file -f input --screenshot-path output --write-db
+gxss                    txt      cat input | /home/op/go/bin/Gxss -c 100 -p Xss | tee output
+hakrawler               txt      cat input | /home/op/go/bin/hakrawler | tee output
+hakrevdns               txt      cat input | /home/op/go/bin/hakrevdns | tee output
+http2smugl              csv      http2smugl detect --targets input --csv-log output
+httprobe                txt      cat input | /home/op/go/bin/httprobe | tee output
+httpx                   txt      cat input | /home/op/go/bin/httpx -o output
+httpx                   jsonl    cat input | /home/op/go/bin/httpx -json -o output
+ipcdn                   txt      docker run -it --rm --mount type=bind,source="$(pwd)",target=/data axiom/ipcdn -c "cat data/input | /bin/ipcdn -m not | tee data/output"
+jaeles                  dir      cat input | /home/op/go/bin/jaeles scan -s /home/op/.jaeles/base-signatures -o output
+katana                  txt      /home/op/go/bin/katana -u _target_ -o output/_cleantarget_ (One-Shot)
+krbrute                 txt      /usr/bin/kr brute input -o text | tee output
+krscan                  txt      /usr/bin/kr scan input -o text | tee output
+kxss                    txt      cat input | /home/op/go/bin/kxss | tee output
+linkfinder              dir      docker run -t --rm -i --mount type=bind,source="$(pwd)",target=/data axiom/linkfinder -d -i _target_ -o cli | tee -a output/_cleantarget_ (One-Shot)
+mantra                  txt      cat input | /home/op/go/bin/mantra -s | tee output
+masscan                 txt      sudo masscan -iL input -oG output
+masscan                 xml      sudo masscan -iL input -oX output
+massdns                 txt      sudo /usr/bin/massdns -r /home/op/lists/resolvers.txt -t A -o F input -w output
+meg                     dir      /home/op/go/bin/meg -v _wordlist_ input output
+naabu-nmap              dir      [ ! -s input ] && exit 1; mkdir output ;cat input | sudo /home/op/go/bin/naabu -o output/naabu.txt
+naabu                   txt      [ ! -s input ] && exit 1; cat input | sudo /home/op/go/bin/naabu -o output
+nmap                    txt      sudo nmap -iL input -oN output
+nmap                    oG       sudo nmap -iL input -oG output
+nmap                    xml      sudo nmap -iL input -oX output
+nmap                    dir      sudo nmap -iL input -oA output/output
+nmap                    none     mkdir output ; sudo nmap -iL input -oA output/output
+nmapx                   txt      sudo nmap -v _target_ -oN output/_cleantarget_.txt (One-Shot)
+nmapx                   xml      sudo nmap -v _target_ -oX output/_cleantarget_.xml (One-Shot)
+nmapx                   oG       sudo nmap -v _target_ -oG output/_cleantarget_ (One-Shot)
+nmapx                   dir      sudo nmap -v _target_ -oA output/_cleantarget_ (One-Shot)
+nmapx                   none     sudo nmap -v _target_ -oA output/_cleantarget_ (One-Shot)
+nuclei-screenshots      dir      /home/op/go/bin/nuclei -update -silent ; /home/op/go/bin/nuclei -l input -headless -id screenshot -V dir='output'
+nuclei                  txt      /home/op/go/bin/nuclei -update -silent ; cat input | /home/op/go/bin/nuclei -t _folder_ -o output
+nuclei                  jsonl    /home/op/go/bin/nuclei -update -silent ; cat input | /home/op/go/bin/nuclei -t _folder_ -jsonl -o output
+openredirex             txt      docker run -t --rm -i --mount type=bind,source="$(pwd)",target=/data axiom/openredirex -l /data/input --keyword FUZZ -p _wordlist_ | tee output
+paramspider             dir      docker run -t --rm -i --mount type=bind,source="$(pwd)",target=/data axiom/paramspider -d _target_ -s | tee output/_cleantarget_ (One-Shot)
+puredns-bruteforce      txt      /home/op/go/bin/puredns bruteforce _wordlist_ _target_ -r /home/op/lists/resolvers.txt  | tee output/_cleantarget_ (One-Shot)
+puredns-resolve         txt      /home/op/go/bin/puredns resolve input --resolvers /home/op/lists/resolvers.txt | tee output
+puredns-single          txt      /home/op/go/bin/puredns bruteforce input --resolvers /home/op/lists/resolvers.txt | tee output
+rustscan                txt      /usr/bin/rustscan -a input -g | tee output
+s3scanner               txt      s3scanner -bucket-file input | tee output
+scrying                 dir      sudo xvfb-run scrying -f input --output output
+shuffledns              txt      /home/op/go/bin/shuffledns -v -d _target_ -r /home/op/lists/resolvers.txt -w _wordlist_ -o output/_cleantarget_ -mode bruteforce (One-Shot)
+shuffledns              dir      /home/op/go/bin/shuffledns -v -d _target_ -r /home/op/lists/resolvers.txt -w _wordlist_ -o output/_cleantarget_ -mode bruteforce (One-Shot)
+shuffledns              jsonl    /home/op/go/bin/shuffledns -v -d _target_ -r /home/op/lists/resolvers.txt -w _wordlist_ -json -o output/_cleantarget_ -mode bruteforce (One-Shot)
+soxy                    txt      cat input | /home/op/bin/soxy | tee output
+sqlmap                  csv      /home/op/recon/sqlmap-dev/sqlmap.py -m input -b --batch --disable-coloring --random-agent --results-file output
+subfinder               txt      /home/op/go/bin/subfinder -d _target_ -o output/_cleantarget_ (One-Shot)
+subfinder               dir      /home/op/go/bin/subfinder -d _target_ -o output/_cleantarget_ (One-Shot)
+subfinder               jsonl    /home/op/go/bin/subfinder -d _target_ -oJ -o output/_cleantarget_ (One-Shot)
+subjs                   txt      cat input | /home/op/go/bin/subjs | tee output
+testssl                 txt      /home/op/recon/testssl.sh/testssl.sh -U -iL input | tee output
+tlscout                 txt      cat input | /home/op/go/bin/tlscout -o output
+tlsx                    txt      cat input | /home/op/go/bin/tlsx -o output
+tlsx                    jsonl    cat input | /home/op/go/bin/tlsx -json -o output
+trufflehog              dir      sudo trufflehog github --org=_target_ | tee output/_cleantarget_ (One-Shot)
+unimap                  txt      sudo unimap -f input | tee output
+wafw00f                 txt      /usr/local/bin/wafw00f -i input -o output
+waybackurls             txt      cat input | /home/op/go/bin/waybackurls | tee output
+waymore                 txt      python3 /home/op/recon/waymore/waymore.py -mode U -i input | tee output
+webscreenshot           dir      /home/op/.local/bin/webscreenshot --no-xserver -r chrome -i input -o output
+whois                   dir      /usr/bin/whois _target_ | tee output/_cleantarget_ (One-Shot)
+wpscan                  dir      /usr/local/bin/wpscan --url _target_ -f cli-no-colour -o output/_cleantarget_  (One-Shot)
+xnlinkfinder            txt      python3 /home/op/recon/xnLinkFinder/xnLinkFinder.py -i input -o cli | tee output
