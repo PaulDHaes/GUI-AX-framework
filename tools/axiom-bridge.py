@@ -2756,7 +2756,8 @@ if __name__ == "__main__":
           f"(set WATCHER_INTERVAL env to change)  "
           f"— or call GET /api/imports/scan to trigger immediately")
 
-    print(f"\nAxiom bridge running on port {PORT}")
+    BIND_HOST = os.environ.get("HOST", "127.0.0.1")
+    print(f"\nAxiom bridge running on {BIND_HOST}:{PORT}")
     print(f"  AXIOM_LS_PATH: {AXIOM_LS_PATH}")
     print(f"  AXIOM_TMP:     {AXIOM_TMP}")
     print(f"  STORE:         {STORE_PATH}")
@@ -2764,4 +2765,4 @@ if __name__ == "__main__":
     print(f"\n[watcher] ✓ Drop scan output files into imports/ — they will be picked up within {WATCHER_INTERVAL}s")
     print(f"{'='*70}\n")
 
-    app.run(host="127.0.0.1", port=PORT)
+    app.run(host=BIND_HOST, port=PORT)

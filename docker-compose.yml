@@ -1,0 +1,30 @@
+## =============================================================================
+##  GUI-AX Framework — Docker Compose (All-in-One)
+##  Ax framework + Dashboard fully installed inside the container.
+##  First run: opens a shell where axiom-configure --run starts automatically.
+##  Dashboard runs in tmux — attach with: tmux attach -t dashboard
+## =============================================================================
+
+services:
+  gui-ax:
+    build:
+      context: .
+    container_name: gui-ax-dashboard
+    platform: linux/amd64
+    ports:
+      - "3000:3000" # Vite UI
+      - "5000:5000" # Flask bridge API
+    volumes:
+      # ── Persistent data only (target store survives container restarts) ──
+      - gui-ax-data:/app/data
+    environment:
+      - PORT=5000
+      - HOST=0.0.0.0
+      # Uncomment and set your Gemini key to enable the AI panel:
+      # - GEMINI_API_KEY=your_key_here
+    stdin_open: true # Required for interactive axiom-configure
+    tty: true # Required for interactive axiom-configure
+    restart: unless-stopped
+
+volumes:
+  gui-ax-data:

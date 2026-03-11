@@ -222,8 +222,8 @@ check_pip() {
 }
 
 install_python_deps() {
-    step "Installing Python bridge dependencies (Flask, flask-cors, watchdog)"
-    "$PYTHON_CMD" -m pip install --user flask flask-cors watchdog 2>&1 | tail -5
+    step "Installing Python bridge dependencies (Flask, flask-cors)"
+    "$PYTHON_CMD" -m pip install --user flask flask-cors 2>&1 | tail -5
     success "Python dependencies installed"
 }
 

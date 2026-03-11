@@ -193,10 +193,10 @@ Keep Ax in sync from the dashboard — a dedicated Settings tab shows the curren
                     ▼
 ┌────────────────────────────────────────────┐
 │         axiom-bridge.py  (Flask)           │
-│  • Ax CLI executor  (axiom-scan / ls / exec)│
+│  • Ax CLI executor (axiom-scan / ls / exec)│
 │  • imports/ watcher  →  auto-parse results │
 │  • Result normaliser + persistent store    │
-│  • DELETE / target management endpoints   │
+│  • DELETE / target management endpoints    │
 └───────────────────┬────────────────────────┘
                     │
                     ▼
@@ -265,6 +265,70 @@ cp .env.example .env
 
 ---
 
+### Docker install (all-in-one)
+
+Run everything — Ax framework + dashboard — inside a single Docker container. No need to install Ax on your host. This is the same approach as the [official Ax Docker install](https://github.com/attacksurge/ax?tab=readme-ov-file#docker), with the dashboard added on top.
+
+```bash
+# 1. Clone the dashboard
+git clone https://github.com/PaulDHaes/GUI-AX-framework ~/gui-ax-framework
+cd ~/gui-ax-framework
+
+# 2. Build and start
+docker compose up --build -d
+
+# 3. Open a shell in the container (auto-prompts axiom-configure on first run)
+docker exec -it gui-ax-dashboard zsh
+```
+
+**First run:** When you open a shell, it detects Ax isn't configured yet and prompts you to run `axiom-configure --run` — the same interactive setup flow as a fresh Ax install (select cloud provider, enter API keys, build Packer image). The dashboard is already running in the background.
+
+**Subsequent runs:** Ax is already configured, so you get dropped straight into a zsh shell with a status summary. The dashboard is running in tmux.
+
+Once running:
+
+- **http://localhost:3000** — Dashboard UI
+- **http://localhost:5000** — Bridge API
+
+**Inside the container:**
+
+Everything lives inside the container — Ax at `/root/.axiom`, dashboard at `/app`. The dashboard runs in a tmux session called `dashboard` with two windows (bridge + Vite). Scans launch in their own tmux sessions, just like a native install.
+
+```bash
+# Open a shell (zsh, same as official Ax Docker)
+docker exec -it gui-ax-dashboard zsh
+
+# View the dashboard logs
+tmux attach -t dashboard
+
+# List all tmux sessions (dashboard + any running scans)
+tmux ls
+
+# Run Ax commands directly — everything is on PATH
+axiom-ls
+axiom-fleet myfleet -i 3
+axiom-scan ...
+```
+
+**What persists across container restarts:**
+
+| Docker volume | Mounts to   | Contents                             |
+| ------------- | ----------- | ------------------------------------ |
+| `gui-ax-data` | `/app/data` | Target store (imported scan results) |
+
+> **Note:** Ax config (cloud accounts, SSH keys, Packer images) lives inside the container. If you remove the container (`docker compose down`), you'll need to re-run `axiom-configure --run`. Use `docker compose stop` / `docker compose start` to preserve everything.
+
+To stop / restart / reset:
+
+```bash
+docker compose stop          # stop without removing (preserves Ax config)
+docker compose start         # restart a stopped container
+docker compose down          # remove container (Ax config lost, data volume kept)
+docker compose down -v       # full reset — wipes everything
+```
+
+---
+
 ## Running
 
 ```bash
@@ -279,6 +343,12 @@ Or both at once:
 
 ```bash
 bash tools/start-dev.sh
+```
+
+Or with Docker:
+
+```bash
+docker compose up --build
 ```
 
 | Service    | Default URL           |
@@ -357,7 +427,10 @@ gui-ax-framework/
 │   ├── axiom-bridge.py      # Flask API + file watcher (main backend)
 │   ├── gui-ax-install.sh    # One-liner installer
 │   ├── ax-update.sh         # Pull latest Ax framework (~/.axiom)
-│   └── start-dev.sh         # Start bridge + UI together
+│   ├── start-dev.sh         # Start bridge + UI together
+│   └── docker-entrypoint.sh # Docker container entrypoint
+├── Dockerfile               # Container image build
+├── docker-compose.yml       # One-command Docker startup
 ├── imports/                 # Drop scan output here
 │   └── processed/           # Auto-moved after import
 ├── data/                    # Persistent JSON store (git-ignored)
