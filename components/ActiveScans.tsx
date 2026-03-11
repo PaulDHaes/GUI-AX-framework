@@ -257,35 +257,26 @@ export default function ActiveScans({
 
   return (
     <div className="space-y-6">
-      {/* Debug Panel */}
-      {/* <Card className="bg-blue-950 border-blue-900">
-        <CardHeader>
-          <CardTitle className="text-sm text-blue-300">🔍 Debug Info</CardTitle>
-        </CardHeader>
-        <CardContent className="text-xs text-blue-200 space-y-1">
-          <div>API URL: {apiUrl}</div>
-          <div>Total scans loaded: {scans.length}</div>
-          <div>Loading: {loading ? "Yes" : "No"}</div>
-          <div>Running scans: {runningScans.length}</div>
-          <div>Completed scans: {completedScans.length}</div>
-          {runningScans.length > 0 && (
-            <div className="mt-2 p-2 bg-blue-900/50 rounded">
-              <div className="font-semibold mb-1">Latest running scan:</div>
-              <pre className="text-[13px] overflow-auto max-h-32">
-                {JSON.stringify(runningScans[runningScans.length - 1], null, 2)}
-              </pre>
-            </div>
-          )}
-          {runningScans.length === 0 && completedScans.length > 0 && (
-            <div className="mt-2 p-2 bg-blue-900/50 rounded">
-              <div className="font-semibold mb-1">Latest completed scan:</div>
-              <pre className="text-[13px] overflow-auto max-h-32">
-                {JSON.stringify(completedScans[0], null, 2)}
-              </pre>
-            </div>
-          )}
-        </CardContent>
-      </Card> */}
+      {/* Tmux info banner */}
+      <div className="flex items-start gap-3 rounded-lg border border-cyan-900/50 bg-cyan-950/20 px-4 py-3 text-sm text-cyan-200">
+        <span className="mt-0.5 text-base leading-none">💡</span>
+        <div>
+          <span className="font-semibold text-cyan-100">
+            Scans run in tmux sessions.
+          </span>{" "}
+          Each scan launches in its own dedicated tmux session on the bridge
+          server, so scans persist even if you close the browser. To inspect a
+          running scan directly, use:{" "}
+          <code className="rounded bg-cyan-900/40 px-1.5 py-0.5 text-xs font-mono text-cyan-300">
+            tmux ls
+          </code>{" "}
+          to list sessions, then{" "}
+          <code className="rounded bg-cyan-900/40 px-1.5 py-0.5 text-xs font-mono text-cyan-300">
+            tmux attach -t &lt;session&gt;
+          </code>{" "}
+          to attach.
+        </div>
+      </div>
 
       {/* Running Scans */}
       {runningScans.length > 0 && (

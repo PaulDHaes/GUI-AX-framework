@@ -2629,6 +2629,16 @@ const DocsPage = () => {
                   Fleet action (power off / terminate)
                 </li>
               </ul>
+              <p className="text-white-400 text-xs mt-3 font-mono">
+                💡 Each scan runs in a dedicated <strong>tmux session</strong>{" "}
+                on the bridge server. Scans persist even if you close the
+                browser. Use <code className="text-cyan-400">tmux ls</code> to
+                list sessions and{" "}
+                <code className="text-cyan-400">
+                  tmux attach -t &lt;session&gt;
+                </code>{" "}
+                to inspect directly.
+              </p>
             </Card>
             <Card>
               <h3 className="text-white font-semibold mb-2">
@@ -2743,7 +2753,7 @@ const App = () => {
             addNotification(
               "scan_started",
               "🚀 Scan Started",
-              `${scan.name || scan.id} · ${scan.module}`,
+              `${scan.name || scan.id} · ${scan.module} — running in tmux session`,
             );
           } else if (prev === "running" && curr === "completed") {
             addNotification(

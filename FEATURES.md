@@ -1,5 +1,9 @@
 # Axiom Dashboard - Complete Security Reconnaissance Platform
 
+> **Tested with:** AWS cloud provider. Other Ax-supported providers (DigitalOcean, Azure, Linode, GCP, Hetzner, IBM Cloud, Scaleway, Exoscale) should work but are unverified.
+>
+> **Verified modules:** `nuclei`, `amass`, `subfinder`, `httpx`, `nmap`, `naabu`, `ffuf`, `gowitness`, `dnsx`, `whois`, `masscan`
+
 ## Project Overview
 
 ### What is Axiom Dashboard?
@@ -91,6 +95,9 @@ User Interface → Bridge API → axiom-scan command → Fleet Instances
                     ↓
               Scan Record Created
               (scans.json)
+                    ↓
+         Scan launched in dedicated tmux session
+         (persists even if browser is closed)
                     ↓
          Background Thread Monitors
               Scan Progress
@@ -223,6 +230,14 @@ Modern full-screen dashboard with comprehensive reconnaissance intelligence:
 
 Real-time scan monitoring and history:
 
+**How scans execute:**
+
+- Each scan is launched in a dedicated **tmux session** on the bridge server
+- Scans persist even if the browser is closed or the UI is refreshed
+- Users can attach to a running scan's tmux session from the terminal: `tmux attach -t <session-name>`
+- List all active scan sessions with `tmux ls`
+- The bridge polls tmux sessions and `stats.log` to report status back to the UI
+
 **Running Scans:**
 
 - Live progress tracking with progress bars
@@ -311,7 +326,7 @@ Automated scan result processing:
 
 **Features:**
 
-- Real-time file watching with Python watchdog library
+- Real-time file watching with Python threading timer (periodic polling)
 - Automatic scanner type detection from filename patterns (e.g., `httpx+01-16_09-39-08.txt` → httpx)
 - Scanner-specific subdirectories (imports/amass/, imports/nmap/, etc.)
 - Intelligent scan grouping by filename prefix
@@ -399,10 +414,11 @@ pattern: "recon-fleet*";
 1. User launches scan via ScanLauncher
 2. Bridge creates scan record in scans.json
 3. Bridge constructs axiom-scan command with all options
-4. Scan executes across fleet
-5. Results auto-import via file watcher
-6. ActiveScans shows real-time progress
-7. Completed results appear in scan history and targets list
+4. Scan launches in a dedicated **tmux session** (persists independently of browser)
+5. Scan executes across fleet
+6. Results auto-import via file watcher
+7. ActiveScans shows real-time progress
+8. Completed results appear in scan history and targets list
 
 ### Fleet Monitoring
 
@@ -438,9 +454,9 @@ components/
   ├── ActiveScans.tsx       # Real-time scan monitoring
   ├── FleetControl.tsx      # Fleet management interface
   ├── FleetManager.tsx      # Fleet overview and actions
-  ├── GeminiPanel.tsx       # AI-powered scan analysis (optional)
   ├── GeoMap.tsx            # Geographic fleet distribution
   ├── TopologyGraph.tsx     # Network topology visualization
+  ├── Settings.tsx          # App settings + Ax updater
   └── ui/                   # shadcn/ui base components
 ```
 
@@ -502,15 +518,16 @@ imports/
 
 **File Watcher Implementation:**
 
+The bridge uses a background threading timer that periodically scans the `imports/` directory for new files:
+
 ```python
-class ImportFileHandler(FileSystemEventHandler):
-    def on_created(self, event):
-        # 1. Skip binary/image files
-        # 2. Classify scanner type (directory or filename)
-        # 3. Detect file format (JSON/XML/TXT/SQLite)
-        # 4. Process file with appropriate parser
-        # 5. Merge into target database
-        # 6. Move to processed/ folder
+# Background thread checks imports/ every 300 seconds (configurable)
+# 1. Skip binary/image files
+# 2. Classify scanner type (directory or filename)
+# 3. Detect file format (JSON/XML/TXT/SQLite)
+# 4. Process file with appropriate parser
+# 5. Merge into target database
+# 6. Move to processed/ folder
 ```
 
 **Parser Examples:**
@@ -581,10 +598,12 @@ npm run build
 
 **Docker Deployment (Future):**
 
+> Both ports **3000** (UI) and **5000** (bridge API) must be exposed. `tmux` must be installed in the container.
+
 ```dockerfile
 # Multi-stage build
 # Stage 1: Build React app
-# Stage 2: Python runtime with Flask
+# Stage 2: Python runtime with Flask + tmux
 # Expose ports: 3000 (frontend), 5000 (API)
 ```
 
@@ -640,6 +659,7 @@ npm run build
 - Linux or macOS (Windows via WSL)
 - Python 3.8+
 - Node.js 18+
+- tmux (required for scan execution)
 - Axiom framework installed and configured
 
 **Axiom Setup:**
@@ -666,7 +686,7 @@ cd axiom-dashboard-ui
 npm install
 
 # Install backend dependencies
-pip3 install flask flask-cors watchdog
+pip3 install flask flask-cors
 
 # Create required directories
 mkdir -p data imports/{amass,nmap,nmapx,nuclei,gowitness,httpx,dnsx,processed}
