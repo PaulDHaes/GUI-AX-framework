@@ -258,6 +258,146 @@ def _parse_sqlite(filepath, filename: str, scan_name: str,
     return targets, changed, file_moved
 
 
+# ── JPEG-only folder (no sqlite DB) ──────────────────────────────────────────
+
+def parse_jpeg_folder(folder_path, scan_name: str, targets: list, display_name: str = None) -> tuple[list, bool]:
+    """Import a gowitness output folder that contains only JPEG/PNG screenshots
+    (no sqlite DB).  Parses filenames like ``scheme---host-port.jpeg`` to
+    reconstruct URLs and creates/updates a target record.
+
+    ``scan_name`` is used as the unique target ID (should be the folder name so
+    each scan gets its own row).  ``display_name`` is the human-readable label
+    shown in the UI (e.g. the scan name from scans.json); falls back to
+    ``scan_name`` if not provided.
+
+    Moves the folder to processed/ when done.
+    Returns (targets, changed).
+    """
+    import os, shutil
+
+    folder_path = Path(folder_path)
+    image_exts  = {".jpeg", ".jpg", ".png"}
+    jpeg_files  = [f for f in folder_path.iterdir()
+                   if f.is_file() and f.suffix.lower() in image_exts]
+
+    if not jpeg_files:
+        print(f"[gowitness] JPEG folder {folder_path.name} has no image files — skipping")
+        return targets, False
+
+    ts          = datetime.now(timezone.utc).strftime("%m-%d_%H-%M-%S")
+    bundle_name = f"gowitness-{ts}"
+    bundle_dest = Path(PROCESSED_PATH) / bundle_name
+    bundle_dest.mkdir(parents=True, exist_ok=True)
+
+    rows_data: list[dict] = []
+    for jf in jpeg_files:
+        stem = jf.stem  # e.g. "https---apple.com-443"
+        m = re.match(r"^(https?)---(.+?)-(\d+)$", stem)
+        if m:
+            scheme, host, port = m.group(1), m.group(2), int(m.group(3))
+        else:
+            m2 = re.match(r"^(https?)---(.+)$", stem)
+            if m2:
+                scheme, host = m2.group(1), m2.group(2)
+                port = 443 if scheme == "https" else 80
+            else:
+                # Unknown format — just copy the file and skip
+                shutil.copy2(str(jf), str(bundle_dest / jf.name))
+                continue
+
+        dest_fname = jf.name
+        shutil.copy2(str(jf), str(bundle_dest / dest_fname))
+
+        rows_data.append({
+            "hostname":     host,
+            "url":          f"{scheme}://{host}",
+            "title":        "",
+            "statusCode":   0,
+            "technologies": [],
+            "port":         port,
+            "scheme":       scheme,
+            "screenshot":   f"/api/screenshots/{bundle_name}/{dest_fname}",
+        })
+
+    if not rows_data:
+        print(f"[gowitness] JPEG folder {folder_path.name}: no parseable filenames")
+        return targets, False
+
+    # Upsert target record
+    # scan_name is the unique bundle ID (full folder name); display_name is the
+    # human-readable label (from scans.json) shown in the UI.
+    _label = display_name or scan_name
+    target_id = scan_name
+    target    = next((t for t in targets if t.get("id") == target_id), None)
+    changed   = False
+
+    if not target:
+        target = {
+            "id":              target_id,
+            "domain":          _label,
+            "programName":     "GoWitness Scan",
+            "status":          "COMPLETED",
+            "subdomains":      [],
+            "vulnerabilities": [],
+            "totalPorts":      0,
+            "sources":         [folder_path.name],
+            "lastScanDate":    datetime.now(timezone.utc).isoformat(),
+        }
+        targets.append(target)
+        changed = True
+    else:
+        if folder_path.name not in target.get("sources", []):
+            target.setdefault("sources", []).append(folder_path.name)
+            changed = True
+
+    existing_hosts = {s.get("hostname") for s in target.get("subdomains", [])}
+    added = 0
+    for r in rows_data:
+        if r["hostname"] in existing_hosts:
+            continue
+        target["subdomains"].append({
+            "id":           r["hostname"],
+            "hostname":     r["hostname"],
+            "url":          r["url"],
+            "ip":           "",
+            "ports":        [{"port": r["port"], "service": r["scheme"],
+                               "banner": "", "isOpen": True}],
+            "technologies": [],
+            "location":     "",
+            "asn":          "",
+            "screenshot":   r["screenshot"],
+            "statusCode":   r["statusCode"],
+            "title":        r["title"],
+        })
+        existing_hosts.add(r["hostname"])
+        changed = True
+        added += 1
+
+    print(f"[gowitness] JPEG folder {folder_path.name}: added {added} entries → bundle {bundle_name}/")
+
+    # Save store
+    if changed:
+        store = load_store()
+        store_targets = store.get("targets", [])
+        store_targets = [t for t in store_targets if t.get("id") != target_id]
+        store_targets.append(target)
+        store["targets"] = store_targets
+        save_store(store)
+
+    # Move source folder to processed/
+    try:
+        dest = Path(PROCESSED_PATH) / folder_path.name
+        if dest.exists():
+            import shutil as _sh
+            _sh.rmtree(str(dest))
+        shutil.move(str(folder_path), str(dest))
+        print(f"[gowitness] ✓ Moved {folder_path.name}/ → processed/")
+    except Exception as e:
+        print(f"[gowitness] ✗ Could not move {folder_path.name}: {e}")
+
+    return targets, changed
+
+
 # ── JSON / JSONL / TXT ────────────────────────────────────────────────────────
 
 def _parse_text(filepath, filename: str, fmt: str, content: str,

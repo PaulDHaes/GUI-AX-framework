@@ -293,6 +293,38 @@ def scan_imports_dir(verbose: bool = True) -> int:
                                 print(f"[watcher] ✓ Moved residual gowitness subfolder → processed/{subdir.name}/")
                     except Exception as e:
                         print(f"[watcher] Could not clean up gowitness subfolder {subdir.name}: {e}")
+                else:
+                    # No DB file — check for JPEG/PNG screenshots only
+                    jpeg_files = [
+                        f for f in subdir.iterdir()
+                        if f.is_file() and f.suffix.lower() in ('.jpeg', '.jpg', '.png')
+                        and subdir.name not in existing_sources
+                    ]
+                    if jpeg_files:
+                        if verbose:
+                            print(f"[watcher] Processing JPEG-only gowitness folder: {subdir.name} ({len(jpeg_files)} images)")
+                        try:
+                            from importers.import_gowitness import parse_jpeg_folder
+                            # Use the full folder name as unique scan ID (not just the prefix)
+                            _jpeg_key = subdir.name.rstrip('.')
+                            try:
+                                with open(SCANS_STORE, "r") as _sf:
+                                    _jpeg_stored = json.load(_sf)
+                                _jpeg_nm = {s["id"]: s.get("name", "") for s in _jpeg_stored if s.get("id") and s.get("name")}
+                                _jpeg_display = _jpeg_nm.get(_jpeg_key) or _jpeg_nm.get(subdir.name) or None
+                            except Exception:
+                                _jpeg_display = None
+                            sn = subdir.name  # full folder name — unique per scan
+                            store = load_store()
+                            t = store.get("targets", [])
+                            t, _changed = parse_jpeg_folder(subdir, sn, t, display_name=_jpeg_display)
+                            if _changed:
+                                store["targets"] = t
+                                save_store(store)
+                                new_files += 1
+                        except Exception as e:
+                            print(f"[watcher] Error processing JPEG-only gowitness folder: {e}")
+                            traceback.print_exc()
 
         # ── Nuclei subdir: imports/nuclei/ (.md + .txt/.jsonl flat files) ──
         if Path(NUCLEI_PATH).exists():
@@ -475,8 +507,22 @@ def process_import_file(filepath, scanner_type=None, skip_move=False):
     # For .dir mode (axiom output): use the parent dir name as the scan batch identifier
     # so all domains from the same run are grouped into one target.
     _parent = Path(filepath).parent.name
+    _gw_display = None  # human-readable display name (gowitness only)
     if _parent.endswith(".dir"):
         scan_name = _parent  # e.g. "whois+02-26_23-34-28.dir"
+    elif scanner_type == "gowitness" and _parent and _parent not in ("gowitness", "imports"):
+        # Use the bundle folder name as the unique target ID so each gowitness scan
+        # gets its own row instead of merging everything under "gowitness".
+        # Strip trailing dot from truncated folder names (filesystem limit)
+        _gw_key = _parent.rstrip('.')
+        try:
+            with open(SCANS_STORE, "r") as _sf:
+                _stored_scans = json.load(_sf)
+            _gw_nm = {s["id"]: s.get("name", "") for s in _stored_scans if s.get("id") and s.get("name")}
+            _gw_display = _gw_nm.get(_gw_key) or _gw_nm.get(_parent) or None
+        except Exception:
+            pass
+        scan_name = _parent  # unique ID = bundle folder name (e.g. "gowitness-03-14_15-04-01")
     elif '-' in filename:
         scan_name = filename.split('-')[0]
     else:
@@ -502,6 +548,15 @@ def process_import_file(filepath, scanner_type=None, skip_move=False):
         targets, changed, file_moved = _importer.parse(
             filepath, scanner, fmt, content, scan_name, targets, skip_move
         )
+        # For gowitness: update domain / programName to the human-readable scan name
+        # when we resolved one from scans.json (so the UI shows e.g. "mycompany-scan"
+        # rather than the raw bundle folder timestamp).
+        if changed and scanner == "gowitness" and _gw_display:
+            for _t in targets:
+                if _t.get("id") == scan_name:
+                    _t["domain"] = _gw_display          # e.g. "xwz"
+                    _t["programName"] = "GoWitness Scan"
+                    break
         if changed:
             store["targets"] = targets
             save_store(store)
@@ -844,6 +899,7 @@ def reimport_processed():
 
     try:
         new_files = scan_imports_dir(verbose=True)
+        patch_gowitness_names()
     except Exception as e:
         return jsonify({"ok": False, "moved": moved, "error": str(e)}), 500
 
@@ -1272,6 +1328,48 @@ def save_scans(scans):
         print(f"[scans] Failed to save scans: {e}")
 
 
+def patch_gowitness_names():
+    """Back-fill human-readable scan names onto gowitness targets in the store.
+
+    Reads data/scans.json and for every gowitness scan entry looks up the
+    matching target in the bridge store (by id == scan["id"]) and sets
+    ``domain`` = scan["name"] and ``programName`` = "GoWitness Scan".
+    Also handles the legacy merged target with id="gowitness" by leaving it
+    untouched (it won't have a matching scan entry).
+    """
+    try:
+        with open(SCANS_STORE, "r") as f:
+            scans = json.load(f)
+    except Exception:
+        return  # nothing to do
+
+    # Build id -> name map for gowitness scans only
+    gw_name_map = {
+        s["id"]: s["name"]
+        for s in scans
+        if s.get("id") and s.get("name")
+        and "gowitness" in s.get("module", "").lower()
+    }
+    if not gw_name_map:
+        return
+
+    store = load_store()
+    changed = False
+    for t in store.get("targets", []):
+        tid = t.get("id", "")
+        # Match on exact id OR the id with trailing dot stripped
+        match_name = gw_name_map.get(tid) or gw_name_map.get(tid.rstrip('.'))
+        if match_name and t.get("domain") != match_name:
+            print(f"[bridge] patch_gowitness_names: '{tid}' -> '{match_name}'")
+            t["domain"] = match_name
+            t["programName"] = "GoWitness Scan"
+            changed = True
+
+    if changed:
+        save_store(store)
+        print(f"[bridge] patch_gowitness_names: store updated")
+
+
 def sanitize_domain(target: str) -> str:
     """Sanitize a single target string (domain, IP, CIDR, or URL).
     Strips whitespace and removes characters that are unsafe in shell contexts.
@@ -1288,42 +1386,24 @@ def sanitize_domain(target: str) -> str:
 
 @app.route("/api/axiom/modules", methods=["GET"])
 def get_modules():
-    """List available axiom scan modules that have their required tool installed"""
-    import shutil
+    """List all axiom scan modules from ~/.axiom/modules.
+    No local binary check — tools run on remote Axiom instances, not locally."""
     modules_path = os.path.expanduser("~/.axiom/modules")
     available = []
     if os.path.exists(modules_path):
         for fname in sorted(os.listdir(modules_path)):
             if fname.startswith('.') or not fname.endswith('.json'):
                 continue
-            module_name = fname[:-5]  # strip .json
-            try:
-                with open(os.path.join(modules_path, fname)) as f:
-                    module_data = json.load(f)
-                # Get command from first entry (module JSON is a list or dict)
-                command = None
-                if isinstance(module_data, list) and module_data:
-                    command = module_data[0].get("command", "")
-                elif isinstance(module_data, dict):
-                    command = module_data.get("command", "")
-
-                if command:
-                    binary = command.strip().split()[0] if command.strip() else None
-                    if binary and shutil.which(binary):
-                        available.append(fname)
-                    else:
-                        print(f"[modules] Skipping {module_name}: '{binary}' not found in PATH")
-                else:
-                    available.append(fname)  # no command field, include anyway
-            except Exception as e:
-                print(f"[modules] Error reading {fname}: {e}")
-                available.append(fname)  # include on parse error
+            available.append(fname)
 
     if not available:
         # Fallback when ~/.axiom/modules doesn't exist yet
         fallback_tools = ["amass", "httpx", "dnsx", "nmap", "ffuf",
-                          "nuclei", "gowitness", "subfinder", "masscan"]
-        available = [f"{t}.json" for t in fallback_tools if shutil.which(t)]
+                          "nuclei", "gowitness", "subfinder", "masscan",
+                          "nuclei", "gowitness", "ffuf", "httpx", "dnsx",
+                          "subfinder", "amass", "nmap", "masscan", "rustscan",
+                          "whois", "katana", "waybackurls", "gospider"]
+        available = [f"{t}.json" for t in dict.fromkeys(fallback_tools)]
 
     return jsonify({"modules": available})
 
@@ -1375,7 +1455,12 @@ def launch_scan():
     # Create scan record
     module_name = module.replace('.json', '')
     scan_id = f"{module_name}+{datetime.utcnow().strftime('%m-%d_%H-%M-%S-%f')[:22]}"
-    
+
+    # Define targets_file path BEFORE building the scan record
+    axiom_tmp = AXIOM_TMP  # Use configured temp path (Docker-friendly)
+    os.makedirs(axiom_tmp, exist_ok=True)
+    targets_file = os.path.join(axiom_tmp, f"{scan_name}_{module}_targets.txt")
+
     try:
         with open(SCANS_STORE, "r") as f:
             scans = json.load(f)
@@ -1387,6 +1472,7 @@ def launch_scan():
         "name": scan_name,
         "module": module,
         "targets": targets,
+        "targetsFile": targets_file,
         "outputFile": output_file,
         "options": options,
         "fleet": deployed_fleet_name,
@@ -1402,11 +1488,7 @@ def launch_scan():
     scans.append(scan)
     save_scans(scans)
     
-    # Build axiom-scan command
-    # Create input file in axiom tmp directory with proper naming
-    axiom_tmp = AXIOM_TMP  # Use configured temp path (Docker-friendly)
-    os.makedirs(axiom_tmp, exist_ok=True)
-    targets_file = os.path.join(axiom_tmp, f"{scan_name}_{module}_targets.txt")
+    # Build axiom-scan command (targets_file already defined above)
     
     # Convert targets to plain strings if they're objects
     target_lines = []
@@ -1531,7 +1613,11 @@ def launch_scan():
         cmd.append("--unsafe")
     if options.get("extraArgs"):
         cmd.extend(shlex.split(options["extraArgs"]))
-    
+
+    # Gowitness cold-start note: the 10s sleep injected in the tmux shell handles
+    # the "websocket url timeout" issue on fresh instances.  No extra flags needed
+    # here — --chrome-timeout is not a valid gowitness flag.
+
     # Register fleet prefix so the fleet endpoint can find these instances
     if fleet_prefix_to_track:
         with SCAN_INSTANCES["lock"]:
@@ -1604,6 +1690,8 @@ def launch_scan():
         
         # Run the scan (output goes directly to imports/ folder)
         echo "" | tee -a {log_file}
+        echo "=== Waiting 10s for instances to fully initialise... ===" | tee -a {log_file}
+        sleep 10
         echo "=== Running Scan ===" | tee -a {log_file}
         {cmd_str} 2>&1 | tee -a {log_file}
         EXIT_CODE=$?
@@ -1998,9 +2086,14 @@ def get_scan(scan_id):
                     final_scan_status = "failed"
                     print(f"[get_scan] Marking {scan_id} as FAILED: {scan_failure_reason}")
 
+            # Prefer the human-readable scan name from scans.json over the raw folder id
+            _stored_name = next(
+                (s.get("name") for s in load_scans() if s.get("id") == scan_id and s.get("name")),
+                scan_id,
+            )
             scan = {
                 "id": scan_id,
-                "name": scan_id,
+                "name": _stored_name,
                 "module": module,
                 "status": final_scan_status,
                 "date": timestamp,
@@ -2013,6 +2106,15 @@ def get_scan(scan_id):
                 "results": results_count,
                 "progress": min(95, (results_count // 10) if results_count else 0) if is_running else 100,
             }
+            # Read the input (targets) file from the scan folder
+            input_file = os.path.join(scan_path, "input")
+            if os.path.isfile(input_file):
+                try:
+                    with open(input_file, "r", encoding="utf-8") as _f:
+                        scan["targetList"] = [l.strip() for l in _f if l.strip()]
+                    print(f"[get_scan] Read {len(scan['targetList'])} targets from input file")
+                except Exception as _e:
+                    print(f"[get_scan] Could not read input file: {_e}")
             if scan_failure_reason:
                 scan["failure_reason"] = scan_failure_reason
                 scan["failure_lines"] = scan_failure_lines_list
@@ -2049,6 +2151,51 @@ def cancel_scan(scan_id):
             return jsonify({"error": "Scan is already completed"}), 400
     
     return jsonify({"error": "Scan not found"}), 404
+
+@app.route("/api/axiom/scans/<scan_id>/targets", methods=["GET"])
+def get_scan_targets(scan_id):
+    """Return the list of targets used for a specific scan.
+
+    Sources (in priority order):
+      1. targetsFile path stored in scans.json → read the txt file
+      2. targets[] array stored in scans.json (dashboard-launched scans)
+      3. input file inside the axiom log scan folder (~/.axiom/logs/<scan_id>/input)
+    """
+    # 1 + 2: check stored scan record
+    scans = load_scans()
+    for scan in scans:
+        if scan.get("id") == scan_id:
+            # Prefer the targets file on disk (most accurate after sanitisation)
+            tf = scan.get("targetsFile")
+            if tf and os.path.isfile(tf):
+                try:
+                    with open(tf, "r", encoding="utf-8") as f:
+                        lines = [l.strip() for l in f if l.strip()]
+                    return jsonify({"targets": lines, "count": len(lines), "source": "file"})
+                except Exception as e:
+                    print(f"[targets] Could not read targetsFile: {e}")
+            # Fall back to the in-memory array
+            stored = scan.get("targets", [])
+            if stored:
+                if isinstance(stored, list):
+                    lines = [str(t) for t in stored if t]
+                else:
+                    lines = []
+                return jsonify({"targets": lines, "count": len(lines), "source": "store"})
+
+    # 3: filesystem scan folder
+    for base_dir in [os.path.expanduser("~/.axiom/logs"), os.path.expanduser("~/.axiom/tmp"), AXIOM_TMP]:
+        input_file = os.path.join(base_dir, scan_id, "input")
+        if os.path.isfile(input_file):
+            try:
+                with open(input_file, "r", encoding="utf-8") as f:
+                    lines = [l.strip() for l in f if l.strip()]
+                return jsonify({"targets": lines, "count": len(lines), "source": "input_file"})
+            except Exception as e:
+                print(f"[targets] Could not read input file: {e}")
+
+    return jsonify({"targets": [], "count": 0, "source": "none"})
+
 
 @app.route("/api/axiom/scans/<scan_id>/logs", methods=["GET"])
 def get_scan_logs(scan_id):
@@ -2181,7 +2328,12 @@ def discover_scans_from_filesystem():
     axiom_tmp = os.path.expanduser("~/.axiom/tmp")
     
     scans = []
-    
+
+    # Build a name lookup from stored scan records so filesystem scan IDs
+    # are mapped to the human-readable name given at launch time.
+    _stored   = load_scans()
+    _name_map = {s["id"]: s["name"] for s in _stored if s.get("id") and s.get("name")}
+
     print(f"[filesystem-scans] Checking {axiom_logs} for completed scans")
     print(f"[filesystem-scans] Checking {axiom_tmp} for running scans")
     
@@ -2246,7 +2398,7 @@ def discover_scans_from_filesystem():
 
                 logs_scan_entry = {
                     "id": folder,
-                    "name": folder,
+                    "name": _name_map.get(folder, folder),
                     "module": module,
                     "status": logs_scan_status,
                     "date": timestamp,
@@ -2380,7 +2532,7 @@ def discover_scans_from_filesystem():
 
                 tmp_entry = {
                     "id": folder,
-                    "name": folder,
+                    "name": _name_map.get(folder, folder),
                     "module": module,
                     "status": final_status,
                     "date": timestamp,
@@ -2747,6 +2899,9 @@ if __name__ == "__main__":
     else:
         print(f"[watcher] Startup scan: no new files found")
 
+    # Back-fill human-readable scan names onto any existing gowitness targets
+    patch_gowitness_names()
+
     # ── Start periodic background scanner ────────────────────────────────
     # Replaces the watchdog Observer so we never poll at the 1-second default
     # rate that PollingObserver uses on Docker/NFS volumes.
@@ -2756,8 +2911,7 @@ if __name__ == "__main__":
           f"(set WATCHER_INTERVAL env to change)  "
           f"— or call GET /api/imports/scan to trigger immediately")
 
-    BIND_HOST = os.environ.get("HOST", "127.0.0.1")
-    print(f"\nAxiom bridge running on {BIND_HOST}:{PORT}")
+    print(f"\nAxiom bridge running on port {PORT}")
     print(f"  AXIOM_LS_PATH: {AXIOM_LS_PATH}")
     print(f"  AXIOM_TMP:     {AXIOM_TMP}")
     print(f"  STORE:         {STORE_PATH}")
@@ -2765,4 +2919,4 @@ if __name__ == "__main__":
     print(f"\n[watcher] ✓ Drop scan output files into imports/ — they will be picked up within {WATCHER_INTERVAL}s")
     print(f"{'='*70}\n")
 
-    app.run(host=BIND_HOST, port=PORT)
+    app.run(host="0.0.0.0", port=PORT)

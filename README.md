@@ -15,6 +15,7 @@ A React + Flask dashboard for [Ax](https://github.com/attacksurge/ax) — the di
 ## 🚦 Quick Start — from zero to first scan
 
 > **New to Ax too?** Follow every step. Already have Ax configured? Jump to [step 3](#3-start-the-dashboard).
+> **Want to full installation proccesses manualy or using docker** checkout [Installation](#Installation).
 
 ### 1. Install everything with one command
 
@@ -500,9 +501,6 @@ git -C ~/.axiom pull --ff-only origin main
 ## Related
 
 - [Ax](https://github.com/attacksurge/ax) — distributed cloud recon framework
-- [Nuclei](https://github.com/projectdiscovery/nuclei) — vulnerability scanner
-- [Amass](https://github.com/owasp-amass/amass) — subdomain enumeration
-- [httpx](https://github.com/projectdiscovery/httpx) — HTTP probing
 
 ## Contributing
 

@@ -663,6 +663,9 @@ const TargetDetail = ({ target }: { target: Target }) => {
   const [vulnSevFilter, setVulnSevFilter] = useState("ALL");
   const [vulnSearch, setVulnSearch] = useState("");
   const [expandedVulns, setExpandedVulns] = useState<Set<string>>(new Set());
+  const [webNameFilter, setWebNameFilter] = useState("");
+  const [webPortFilter, setWebPortFilter] = useState("");
+  const [webStatusFilter, setWebStatusFilter] = useState("");
 
   const toggleVulnExpand = (key: string) =>
     setExpandedVulns((prev) => {
@@ -1072,122 +1075,248 @@ const TargetDetail = ({ target }: { target: Target }) => {
 
       {/* Websites view */}
       {activeTab === "websites" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {target.subdomains.map((sub) => {
-            const statusCode = sub.statusCode ?? 0;
-            const title = sub.title ?? "";
-            const firstPort = sub.ports[0];
-            // Screenshot path stored as relative /api/screenshots/... — prefix with bridge host
-            const screenshotSrc = sub.screenshot
-              ? sub.screenshot.startsWith("/api/")
-                ? `http://localhost:5000${sub.screenshot}`
-                : sub.screenshot
-              : null;
-            const statusColor =
-              statusCode >= 200 && statusCode < 300
-                ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-                : statusCode >= 300 && statusCode < 400
-                  ? "text-yellow-400 border-yellow-500/30 bg-yellow-500/10"
-                  : statusCode >= 400
-                    ? "text-red-400 border-red-500/30 bg-red-500/10"
-                    : "text-white-400 border-dark-600/40 bg-dark-700/40";
-            return (
-              <div
-                key={sub.id}
-                className="bg-dark-800 rounded-lg overflow-hidden border border-dark-700 hover:border-dark-600 transition-colors group card-hover"
+        <div className="space-y-4">
+          {/* Filter bar */}
+          <div className="flex flex-wrap gap-2 bg-dark-800 border border-dark-700 rounded-lg px-3 py-2.5 items-center">
+            <Filter className="w-3.5 h-3.5 text-white-500 flex-shrink-0" />
+            <input
+              type="text"
+              placeholder="Filter by name…"
+              value={webNameFilter}
+              onChange={(e) => setWebNameFilter(e.target.value)}
+              className="bg-dark-700 border border-dark-600 rounded px-2.5 py-1 text-xs text-white font-mono placeholder-white-600 focus:outline-none focus:border-cyan-500 w-44"
+            />
+            <input
+              type="text"
+              placeholder="Filter by port (e.g. 443)"
+              value={webPortFilter}
+              onChange={(e) => setWebPortFilter(e.target.value)}
+              className="bg-dark-700 border border-dark-600 rounded px-2.5 py-1 text-xs text-white font-mono placeholder-white-600 focus:outline-none focus:border-cyan-500 w-44"
+            />
+            <div className="flex items-center gap-1">
+              {(["2xx", "3xx", "4xx", "5xx"] as const).map((range) => {
+                const active = webStatusFilter === range;
+                const colors: Record<string, string> = {
+                  "2xx": active
+                    ? "bg-emerald-600/30 border-emerald-500/60 text-emerald-300"
+                    : "border-dark-600 text-white-500 hover:border-emerald-500/40 hover:text-emerald-400",
+                  "3xx": active
+                    ? "bg-yellow-600/30 border-yellow-500/60 text-yellow-300"
+                    : "border-dark-600 text-white-500 hover:border-yellow-500/40 hover:text-yellow-400",
+                  "4xx": active
+                    ? "bg-red-600/30 border-red-500/60 text-red-300"
+                    : "border-dark-600 text-white-500 hover:border-red-500/40 hover:text-red-400",
+                  "5xx": active
+                    ? "bg-purple-600/30 border-purple-500/60 text-purple-300"
+                    : "border-dark-600 text-white-500 hover:border-purple-500/40 hover:text-purple-400",
+                };
+                return (
+                  <button
+                    key={range}
+                    onClick={() => setWebStatusFilter(active ? "" : range)}
+                    className={`px-2 py-1 text-[11px] font-mono rounded border transition-colors ${colors[range]}`}
+                  >
+                    {range}
+                  </button>
+                );
+              })}
+              <input
+                type="text"
+                placeholder="exact…"
+                value={
+                  ["2xx", "3xx", "4xx", "5xx"].includes(webStatusFilter)
+                    ? ""
+                    : webStatusFilter
+                }
+                onChange={(e) => setWebStatusFilter(e.target.value)}
+                className="bg-dark-700 border border-dark-600 rounded px-2 py-1 text-xs text-white font-mono placeholder-white-600 focus:outline-none focus:border-cyan-500 w-16"
+              />
+            </div>
+            {(webNameFilter || webPortFilter || webStatusFilter) && (
+              <button
+                onClick={() => {
+                  setWebNameFilter("");
+                  setWebPortFilter("");
+                  setWebStatusFilter("");
+                }}
+                className="text-xs text-white-500 hover:text-white transition-colors font-mono flex items-center gap-1"
               >
-                <div className="h-28 bg-dark-900 relative">
-                  {screenshotSrc ? (
-                    <img
-                      src={screenshotSrc}
-                      alt={sub.hostname}
-                      className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-white-700">
-                      <Globe className="w-7 h-7 opacity-30" />
-                    </div>
-                  )}
-                </div>
-                <div className="p-3">
-                  {/* Hostname — clickable if url available */}
-                  {sub.url ? (
-                    <a
-                      href={sub.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block font-bold text-cyan-300 truncate text-sm mb-0.5 font-mono group-hover:text-primary-300 transition-colors hover:underline"
-                      title={sub.url}
-                    >
-                      {sub.hostname}
-                    </a>
-                  ) : (
-                    <h4
-                      className="font-bold text-white truncate text-sm mb-0.5 font-mono group-hover:text-primary-300 transition-colors"
-                      title={sub.hostname}
-                    >
-                      {sub.hostname}
-                    </h4>
-                  )}
-                  {/* Page title */}
-                  {title && (
-                    <p
-                      className="text-[14px] text-white-400 truncate mb-1.5 italic"
-                      title={title}
-                    >
-                      {title}
-                    </p>
-                  )}
-                  <div className="flex items-center gap-2 text-[14px] text-white-500 mb-2">
-                    <span className="truncate max-w-[120px]">
-                      {sub.location || (sub.ip !== sub.hostname ? sub.ip : "—")}
-                    </span>
-                  </div>
-                  {sub.technologies.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {sub.technologies.slice(0, 4).map((tech) => (
-                        <span
-                          key={tech}
-                          className="px-1.5 py-0.5 bg-dark-700 rounded text-[13px] text-white-400 border border-dark-600/30 font-mono"
-                        >
-                          {tech}
-                        </span>
-                      ))}
-                      {sub.technologies.length > 4 && (
-                        <span className="px-1.5 py-0.5 text-[13px] text-white-600 font-mono">
-                          +{sub.technologies.length - 4}
-                        </span>
+                <X className="w-3 h-3" /> clear
+              </button>
+            )}
+            <span className="ml-auto text-[11px] text-white-600 font-mono">
+              {
+                target.subdomains.filter((sub) => {
+                  const nameOk =
+                    !webNameFilter ||
+                    sub.hostname
+                      .toLowerCase()
+                      .includes(webNameFilter.toLowerCase());
+                  const portOk =
+                    !webPortFilter ||
+                    sub.ports.some((p) =>
+                      String(p.port).includes(webPortFilter),
+                    );
+                  const _code = sub.statusCode ?? 0;
+                  const statusOk =
+                    !webStatusFilter ||
+                    (webStatusFilter === "2xx"
+                      ? _code >= 200 && _code < 300
+                      : webStatusFilter === "3xx"
+                        ? _code >= 300 && _code < 400
+                        : webStatusFilter === "4xx"
+                          ? _code >= 400 && _code < 500
+                          : webStatusFilter === "5xx"
+                            ? _code >= 500 && _code < 600
+                            : String(_code).includes(webStatusFilter));
+                  return nameOk && portOk && statusOk;
+                }).length
+              }{" "}
+              / {target.subdomains.length} shown
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {target.subdomains
+              .filter((sub) => {
+                const nameOk =
+                  !webNameFilter ||
+                  sub.hostname
+                    .toLowerCase()
+                    .includes(webNameFilter.toLowerCase());
+                const portOk =
+                  !webPortFilter ||
+                  sub.ports.some((p) => String(p.port).includes(webPortFilter));
+                const _sc = sub.statusCode ?? 0;
+                const statusOk =
+                  !webStatusFilter ||
+                  (webStatusFilter === "2xx"
+                    ? _sc >= 200 && _sc < 300
+                    : webStatusFilter === "3xx"
+                      ? _sc >= 300 && _sc < 400
+                      : webStatusFilter === "4xx"
+                        ? _sc >= 400 && _sc < 500
+                        : webStatusFilter === "5xx"
+                          ? _sc >= 500 && _sc < 600
+                          : String(_sc).includes(webStatusFilter));
+                return nameOk && portOk && statusOk;
+              })
+              .map((sub) => {
+                const statusCode = sub.statusCode ?? 0;
+                const title = sub.title ?? "";
+                const firstPort = sub.ports[0];
+                // Screenshot path stored as relative /api/screenshots/... — prefix with bridge host
+                const screenshotSrc = sub.screenshot
+                  ? sub.screenshot.startsWith("/api/")
+                    ? `http://localhost:5000${sub.screenshot}`
+                    : sub.screenshot
+                  : null;
+                const statusColor =
+                  statusCode >= 200 && statusCode < 300
+                    ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                    : statusCode >= 300 && statusCode < 400
+                      ? "text-yellow-400 border-yellow-500/30 bg-yellow-500/10"
+                      : statusCode >= 400
+                        ? "text-red-400 border-red-500/30 bg-red-500/10"
+                        : "text-white-400 border-dark-600/40 bg-dark-700/40";
+                return (
+                  <div
+                    key={sub.id}
+                    className="bg-dark-800 rounded-lg overflow-hidden border border-dark-700 hover:border-dark-600 transition-colors group card-hover"
+                  >
+                    <div className="h-70 bg-dark-900 relative">
+                      {screenshotSrc ? (
+                        <img
+                          src={screenshotSrc}
+                          alt={sub.hostname}
+                          className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-white-700">
+                          <Globe className="w-7 h-7 opacity-30" />
+                        </div>
                       )}
                     </div>
-                  )}
-                  <div className="flex flex-wrap gap-1">
-                    {sub.ports.map((p) => (
-                      <span
-                        key={p.port}
-                        className={`text-[13px] px-1.5 py-0.5 rounded border font-mono ${
-                          p.service === "https" || p.port === 443
-                            ? "border-cyan-500/30 text-cyan-400 bg-cyan-500/10"
-                            : p.port === 80
-                              ? "border-success-500/30 text-success-400 bg-success-500/10"
-                              : "border-dark-600 text-white-500"
-                        }`}
-                      >
-                        {p.port}/{p.service}
-                      </span>
-                    ))}
-                    {/* Status code badge — top left */}
-                    {statusCode > 0 && (
-                      <div
-                        className={`absolute top-1 px-1.5 py-0.5 rounded text-[13px] font-mono border ${statusColor}`}
-                      >
-                        {statusCode}
+                    <div className="p-3">
+                      {/* Hostname — clickable if url available */}
+                      {sub.url ? (
+                        <a
+                          href={sub.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block font-bold text-cyan-300 truncate text-sm mb-0.5 font-mono group-hover:text-primary-300 transition-colors hover:underline"
+                          title={sub.url}
+                        >
+                          {sub.hostname}
+                        </a>
+                      ) : (
+                        <h4
+                          className="font-bold text-white truncate text-sm mb-0.5 font-mono group-hover:text-primary-300 transition-colors"
+                          title={sub.hostname}
+                        >
+                          {sub.hostname}
+                        </h4>
+                      )}
+                      {/* Page title */}
+                      {title && (
+                        <p
+                          className="text-[14px] text-white-400 truncate mb-1.5 italic"
+                          title={title}
+                        >
+                          {title}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2 text-[14px] text-white-500 mb-2">
+                        <span className="truncate max-w-[120px]">
+                          {sub.location ||
+                            (sub.ip !== sub.hostname ? sub.ip : "—")}
+                        </span>
                       </div>
-                    )}
+                      {sub.technologies.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {sub.technologies.slice(0, 4).map((tech) => (
+                            <span
+                              key={tech}
+                              className="px-1.5 py-0.5 bg-dark-700 rounded text-[13px] text-white-400 border border-dark-600/30 font-mono"
+                            >
+                              {tech}
+                            </span>
+                          ))}
+                          {sub.technologies.length > 4 && (
+                            <span className="px-1.5 py-0.5 text-[13px] text-white-600 font-mono">
+                              +{sub.technologies.length - 4}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-1">
+                        {sub.ports.map((p) => (
+                          <span
+                            key={p.port}
+                            className={`text-[13px] px-1.5 py-0.5 rounded border font-mono ${
+                              p.service === "https" || p.port === 443
+                                ? "border-cyan-500/30 text-cyan-400 bg-cyan-500/10"
+                                : p.port === 80
+                                  ? "border-success-500/30 text-success-400 bg-success-500/10"
+                                  : "border-dark-600 text-white-500"
+                            }`}
+                          >
+                            {p.port}/{p.service}
+                          </span>
+                        ))}
+                        {/* Status code badge — top left */}
+                        {statusCode > 0 && (
+                          <div
+                            className={`absolute top-1 px-1.5 py-0.5 rounded text-[13px] font-mono border ${statusColor}`}
+                          >
+                            {statusCode}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
+          </div>
         </div>
       )}
 
@@ -2374,7 +2503,7 @@ const DocsPage = () => {
               [
                 "2",
                 "Start the frontend",
-                "npm run dev — opens the dashboard at http://localhost:5173",
+                "./app/tools/start-dev.sh — opens the dashboard at http://localhost:3000",
               ],
               [
                 "3",
@@ -2629,16 +2758,6 @@ const DocsPage = () => {
                   Fleet action (power off / terminate)
                 </li>
               </ul>
-              <p className="text-white-400 text-xs mt-3 font-mono">
-                💡 Each scan runs in a dedicated <strong>tmux session</strong>{" "}
-                on the bridge server. Scans persist even if you close the
-                browser. Use <code className="text-cyan-400">tmux ls</code> to
-                list sessions and{" "}
-                <code className="text-cyan-400">
-                  tmux attach -t &lt;session&gt;
-                </code>{" "}
-                to inspect directly.
-              </p>
             </Card>
             <Card>
               <h3 className="text-white font-semibold mb-2">
@@ -2741,38 +2860,71 @@ const App = () => {
 
   // ── Poll scan statuses for notifications ────────────────
   useEffect(() => {
+    let initialised = false;
+
     const pollScans = async () => {
       try {
         const resp = await fetch("http://localhost:5000/api/axiom/scans");
         if (!resp.ok) return;
         const scans: any[] = await resp.json();
+
+        // On the very first poll, seed prevScanStatuses without firing any
+        // notifications — avoids false "started" toasts for scans that were
+        // already running when the dashboard opened.
+        if (!initialised) {
+          scans.forEach((scan) => {
+            prevScanStatuses.current[scan.id] = scan.status;
+          });
+          initialised = true;
+          return;
+        }
+
         scans.forEach((scan) => {
           const prev = prevScanStatuses.current[scan.id];
           const curr = scan.status;
+          const label = scan.name || scan.id;
+
           if (!prev && curr === "running") {
+            // Brand-new scan appeared mid-session
             addNotification(
               "scan_started",
               "🚀 Scan Started",
-              `${scan.name || scan.id} · ${scan.module} — running in tmux session`,
+              `${label} · ${scan.module || ""}`,
             );
           } else if (prev === "running" && curr === "completed") {
-            addNotification(
-              "scan_completed",
-              "✅ Scan Completed",
-              `${scan.name || scan.id} finished`,
-            );
-          } else if (prev === "running" && curr === "failed") {
+            const resultCount: number = scan.resultCount ?? scan.results ?? -1;
+            if (resultCount === 0) {
+              addNotification(
+                "scan_empty",
+                "⚠️ Scan Finished — 0 Results",
+                `${label} completed but returned no output. The input format may be incorrect for this module.`,
+              );
+            } else {
+              addNotification(
+                "scan_completed",
+                "✅ Scan Completed",
+                `${label} finished${resultCount > 0 ? ` · ${resultCount} results` : ""}`,
+              );
+            }
+          } else if (
+            prev === "running" &&
+            (curr === "failed" || curr === "error")
+          ) {
             addNotification(
               "scan_failed",
               "❌ Scan Failed",
-              `${scan.name || scan.id} failed`,
+              `${label} failed${scan.error ? ` — ${scan.error}` : ""}`,
             );
           }
+
           prevScanStatuses.current[scan.id] = curr;
         });
       } catch {}
     };
-    const interval = setInterval(pollScans, 60_000); // 1 minute
+
+    // Run immediately so the panel is populated quickly, then every 15 s
+    pollScans();
+    const interval = setInterval(pollScans, 15_000);
     return () => clearInterval(interval);
   }, [addNotification]);
 
@@ -2781,11 +2933,13 @@ const App = () => {
       ? "bg-success-400"
       : type === "scan_failed"
         ? "bg-danger-400"
-        : type === "scan_started"
-          ? "bg-cyan-400"
-          : type.startsWith("fleet_")
-            ? "bg-warn-400"
-            : "bg-primary-400";
+        : type === "scan_empty"
+          ? "bg-yellow-400"
+          : type === "scan_started"
+            ? "bg-cyan-400"
+            : type.startsWith("fleet_")
+              ? "bg-warn-400"
+              : "bg-primary-400";
 
   return (
     <div className="min-h-screen bg-dark-900 text-white-100 font-sans selection:bg-primary-500/30">

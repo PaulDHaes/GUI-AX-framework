@@ -17,6 +17,9 @@ import {
   Play,
   StopCircle,
   RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  Target,
 } from "lucide-react";
 import {
   Table,
@@ -51,6 +54,7 @@ interface Scan {
   output?: string;
   failure_reason?: string;
   failure_lines?: string[];
+  targetList?: string[];
 }
 
 interface ActiveScansProps {
@@ -64,6 +68,45 @@ export default function ActiveScans({
 }: ActiveScansProps) {
   const [scans, setScans] = useState<Scan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedTargets, setExpandedTargets] = useState<
+    Record<string, string[] | null>
+  >({});
+
+  const fetchTargetList = async (scanId: string) => {
+    if (expandedTargets[scanId] !== undefined) {
+      // Toggle off if already open
+      setExpandedTargets((prev) => ({
+        ...prev,
+        [scanId]: prev[scanId] === null ? null : (undefined as any),
+      }));
+      if (expandedTargets[scanId] !== undefined) {
+        setExpandedTargets((prev) => {
+          const n = { ...prev };
+          delete n[scanId];
+          return n;
+        });
+        return;
+      }
+    }
+    // Mark as loading
+    setExpandedTargets((prev) => ({ ...prev, [scanId]: null }));
+    try {
+      const resp = await fetch(
+        `${apiUrl}/api/axiom/scans/${encodeURIComponent(scanId)}/targets`,
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        setExpandedTargets((prev) => ({
+          ...prev,
+          [scanId]: data.targets ?? [],
+        }));
+      } else {
+        setExpandedTargets((prev) => ({ ...prev, [scanId]: [] }));
+      }
+    } catch {
+      setExpandedTargets((prev) => ({ ...prev, [scanId]: [] }));
+    }
+  };
 
   useEffect(() => {
     // Fetch once on mount; subsequent updates via explicit Refresh button
@@ -257,26 +300,35 @@ export default function ActiveScans({
 
   return (
     <div className="space-y-6">
-      {/* Tmux info banner */}
-      <div className="flex items-start gap-3 rounded-lg border border-cyan-900/50 bg-cyan-950/20 px-4 py-3 text-sm text-cyan-200">
-        <span className="mt-0.5 text-base leading-none">💡</span>
-        <div>
-          <span className="font-semibold text-cyan-100">
-            Scans run in tmux sessions.
-          </span>{" "}
-          Each scan launches in its own dedicated tmux session on the bridge
-          server, so scans persist even if you close the browser. To inspect a
-          running scan directly, use:{" "}
-          <code className="rounded bg-cyan-900/40 px-1.5 py-0.5 text-xs font-mono text-cyan-300">
-            tmux ls
-          </code>{" "}
-          to list sessions, then{" "}
-          <code className="rounded bg-cyan-900/40 px-1.5 py-0.5 text-xs font-mono text-cyan-300">
-            tmux attach -t &lt;session&gt;
-          </code>{" "}
-          to attach.
-        </div>
-      </div>
+      {/* Debug Panel */}
+      {/* <Card className="bg-blue-950 border-blue-900">
+        <CardHeader>
+          <CardTitle className="text-sm text-blue-300">🔍 Debug Info</CardTitle>
+        </CardHeader>
+        <CardContent className="text-xs text-blue-200 space-y-1">
+          <div>API URL: {apiUrl}</div>
+          <div>Total scans loaded: {scans.length}</div>
+          <div>Loading: {loading ? "Yes" : "No"}</div>
+          <div>Running scans: {runningScans.length}</div>
+          <div>Completed scans: {completedScans.length}</div>
+          {runningScans.length > 0 && (
+            <div className="mt-2 p-2 bg-blue-900/50 rounded">
+              <div className="font-semibold mb-1">Latest running scan:</div>
+              <pre className="text-[13px] overflow-auto max-h-32">
+                {JSON.stringify(runningScans[runningScans.length - 1], null, 2)}
+              </pre>
+            </div>
+          )}
+          {runningScans.length === 0 && completedScans.length > 0 && (
+            <div className="mt-2 p-2 bg-blue-900/50 rounded">
+              <div className="font-semibold mb-1">Latest completed scan:</div>
+              <pre className="text-[13px] overflow-auto max-h-32">
+                {JSON.stringify(completedScans[0], null, 2)}
+              </pre>
+            </div>
+          )}
+        </CardContent>
+      </Card> */}
 
       {/* Running Scans */}
       {runningScans.length > 0 && (
@@ -370,6 +422,48 @@ export default function ActiveScans({
                       />
                     </div>
                   </div>
+                  {/* Targets panel */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fetchTargetList(scan.id);
+                    }}
+                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors mt-1"
+                  >
+                    <Target className="w-3 h-3" />
+                    {expandedTargets[scan.id] !== undefined
+                      ? "Hide targets"
+                      : "Show targets"}
+                    {expandedTargets[scan.id] !== undefined ? (
+                      <ChevronUp className="w-3 h-3" />
+                    ) : (
+                      <ChevronDown className="w-3 h-3" />
+                    )}
+                  </button>
+                  {expandedTargets[scan.id] !== undefined && (
+                    <div className="mt-1 bg-dark-900/60 border border-slate-700 rounded p-2 max-h-40 overflow-y-auto">
+                      {expandedTargets[scan.id] === null ? (
+                        <p className="text-xs text-slate-500 font-mono">
+                          Loading…
+                        </p>
+                      ) : expandedTargets[scan.id]!.length === 0 ? (
+                        <p className="text-xs text-slate-500 font-mono">
+                          No target list available
+                        </p>
+                      ) : (
+                        <ul className="space-y-0.5">
+                          {expandedTargets[scan.id]!.map((t, i) => (
+                            <li
+                              key={i}
+                              className="text-xs font-mono text-cyan-300"
+                            >
+                              {t}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -424,61 +518,105 @@ export default function ActiveScans({
                 </TableHeader>
                 <TableBody>
                   {completedScans.map((scan) => (
-                    <TableRow
-                      key={scan.id}
-                      className="border-slate-700 hover:bg-slate-700/30 cursor-pointer transition-colors"
-                      onClick={() => onScanSelected?.(scan.id)}
-                    >
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {getStatusIcon(scan.status)}
-                          {getStatusBadge(scan.status)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-medium text-white">
-                        <div>{scan.name}</div>
-                        {scan.status === "failed" && scan.failure_reason && (
-                          <div
-                            className="text-xs text-red-400 font-mono mt-0.5 max-w-xs truncate"
-                            title={[
-                              scan.failure_reason,
-                              ...(scan.failure_lines ?? []),
-                            ].join("\n")}
-                          >
-                            ⚠ {scan.failure_reason}
+                    <React.Fragment key={scan.id}>
+                      <TableRow
+                        className="border-slate-700 hover:bg-slate-700/30 cursor-pointer transition-colors"
+                        onClick={() => onScanSelected?.(scan.id)}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {getStatusIcon(scan.status)}
+                            {getStatusBadge(scan.status)}
                           </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold font-mono bg-primary-500/20 border border-primary-500/40 text-white">
-                          {scan.module}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-slate-300">
-                        <span
-                          className={
-                            (scan.results ?? 0) === 0
-                              ? "text-red-400 font-mono"
-                              : "text-emerald-400 font-mono"
-                          }
-                        >
-                          {scan.results ?? 0}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-slate-300">
-                        {getTargetCount(scan)}
-                      </TableCell>
-                      <TableCell className="text-slate-300">
-                        {scan.runtime ||
-                          formatDuration(
-                            getScanStartTime(scan),
-                            scan.completedAt,
+                        </TableCell>
+                        <TableCell className="font-medium text-white">
+                          <div>{scan.name}</div>
+                          {scan.status === "failed" && scan.failure_reason && (
+                            <div
+                              className="text-xs text-red-400 font-mono mt-0.5 max-w-xs truncate"
+                              title={[
+                                scan.failure_reason,
+                                ...(scan.failure_lines ?? []),
+                              ].join("\n")}
+                            >
+                              ⚠ {scan.failure_reason}
+                            </div>
                           )}
-                      </TableCell>
-                      <TableCell className="text-sm text-slate-400">
-                        {new Date(getScanStartTime(scan)).toLocaleString()}
-                      </TableCell>
-                    </TableRow>
+                        </TableCell>
+                        <TableCell>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold font-mono bg-primary-500/20 border border-primary-500/40 text-white">
+                            {scan.module}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-slate-300">
+                          <span
+                            className={
+                              (scan.results ?? 0) === 0
+                                ? "text-red-400 font-mono"
+                                : "text-emerald-400 font-mono"
+                            }
+                          >
+                            {scan.results ?? 0}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-slate-300">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              fetchTargetList(scan.id);
+                            }}
+                            className="flex items-center gap-1 text-xs text-slate-400 hover:text-white transition-colors"
+                            title="Show targets used for this scan"
+                          >
+                            <Target className="w-3 h-3" />
+                            {typeof scan.targets === "number"
+                              ? scan.targets
+                              : getTargetCount(scan)}
+                            {expandedTargets[scan.id] !== undefined ? (
+                              <ChevronUp className="w-3 h-3" />
+                            ) : (
+                              <ChevronDown className="w-3 h-3" />
+                            )}
+                          </button>
+                        </TableCell>
+                        <TableCell className="text-slate-300">
+                          {scan.runtime ||
+                            formatDuration(
+                              getScanStartTime(scan),
+                              scan.completedAt,
+                            )}
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-400">
+                          {new Date(getScanStartTime(scan)).toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                      {expandedTargets[scan.id] !== undefined && (
+                        <TableRow className="border-slate-700 bg-slate-900/40 hover:bg-slate-900/40">
+                          <TableCell colSpan={7} className="py-2 px-4">
+                            {expandedTargets[scan.id] === null ? (
+                              <p className="text-xs text-slate-500 font-mono">
+                                Loading targets…
+                              </p>
+                            ) : expandedTargets[scan.id]!.length === 0 ? (
+                              <p className="text-xs text-slate-500 font-mono">
+                                No target list available for this scan
+                              </p>
+                            ) : (
+                              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto py-1">
+                                {expandedTargets[scan.id]!.map((t, i) => (
+                                  <span
+                                    key={i}
+                                    className="text-xs font-mono text-cyan-300 bg-dark-800 border border-dark-700 px-2 py-0.5 rounded"
+                                  >
+                                    {t}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
                   ))}
                 </TableBody>
               </Table>

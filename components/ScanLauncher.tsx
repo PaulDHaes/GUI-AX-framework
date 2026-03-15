@@ -23,197 +23,193 @@ import { Checkbox } from "./ui/checkbox";
 import { Rocket, Upload, AlertCircle, X } from "lucide-react";
 import { Alert, AlertDescription } from "./ui/alert";
 
-// Go-based tools per provisioner (only available when Go is installed on the image)
-const PROVISIONER_GO_TOOLS: Record<string, string[]> = {
-  barebones: ["gorgo"],
-  default: [
-    "amass",
-    "anew",
-    "assetfinder",
-    "chaos-client",
-    "crlfuzz",
-    "dalfox",
-    "dirdar",
-    "dnscewl",
-    "dnsx",
-    "feroxbuster",
-    "gau",
-    "gauplus",
-    "gobuster",
-    "gospider",
-    "gowitness",
-    "gxss",
-    "hakrawler",
-    "hakrevdns",
-    "httprobe",
-    "httpx",
-    "interactsh-client",
-    "jaeles",
-    "katana",
-    "kiterunner",
-    "kxss",
-    "massdns",
-    "naabu",
-    "nuclei",
-    "puredns",
-    "rustscan",
-    "shuffledns",
-    "subfinder",
-    "subjs",
-    "tlsx",
-    "unimap",
-    "waybackurls",
-  ],
-  reconftw: [
-    "amass",
-    "anew",
-    "assetfinder",
-    "dnsx",
-    "gau",
-    "gospider",
-    "gowitness",
-    "gotator",
-    "hakrawler",
-    "httpx",
-    "interactsh-client",
-    "katana",
-    "nuclei",
-    "puredns",
-    "subfinder",
-    "subjs",
-    "unimap",
-    "waybackurls",
-  ],
-  extras: [
-    "amass",
-    "anew",
-    "assetfinder",
-    "chaos-client",
-    "crlfuzz",
-    "dalfox",
-    "dnsx",
-    "feroxbuster",
-    "gau",
-    "gauplus",
-    "gobuster",
-    "gospider",
-    "gowitness",
-    "gxss",
-    "hakrawler",
-    "hakrevdns",
-    "httprobe",
-    "httpx",
-    "interactsh-client",
-    "jaeles",
-    "katana",
-    "kiterunner",
-    "kxss",
-    "massdns",
-    "naabu",
-    "nuclei",
-    "puredns",
-    "rustscan",
-    "shuffledns",
-    "subfinder",
-    "subjs",
-    "tlsx",
-    "unimap",
-    "waybackurls",
-  ],
-};
-
-// Tools available for each Axiom Packer provisioner image (non-Go tools only)
+// All tools available per Axiom Packer provisioner image (Go + non-Go combined)
 const PROVISIONER_TOOLS: Record<string, string[]> = {
   barebones: [
+    "anew",
     "cero",
     "commix",
     "corsy",
+    "dnsx",
     "dnsgen",
     "dnsrecon",
     "exec",
+    "gorgo",
+    "gowitness",
+    "httpx",
     "ipcdn",
     "linkfinder",
     "masscan",
     "nmap",
+    "nuclei",
     "openredirex",
     "paramspider",
+    "subfinder",
     "trufflehog",
   ],
   default: [
+    "amass",
+    "anew",
     "aquatone",
     "arjun",
+    "assetfinder",
     "cero",
+    "chaos-client",
     "commix",
+    "crlfuzz",
+    "dalfox",
+    "dirdar",
     "dirsearch",
+    "dnscewl",
+    "dnsx",
     "dnsvalidator",
+    "feroxbuster",
     "ffuf",
+    "gau",
+    "gauplus",
+    "gobuster",
+    "gospider",
+    "gowitness",
+    "gxss",
+    "hakrawler",
+    "hakrevdns",
+    "httprobe",
+    "httpx",
+    "interactsh-client",
     "ipcdn",
+    "jaeles",
+    "katana",
+    "kiterunner",
+    "kxss",
     "masscan",
+    "massdns",
     "meg",
+    "naabu",
     "nmap",
+    "nuclei",
+    "puredns",
+    "rustscan",
     "s3scanner",
     "scrying",
+    "shuffledns",
     "sqlmap",
+    "subfinder",
+    "subjs",
     "testssl",
+    "tlsx",
     "trufflehog",
+    "unimap",
     "wafw00f",
+    "waybackurls",
     "webscreenshot",
     "whois",
     "wpscan",
   ],
   reconftw: [
+    "amass",
+    "anew",
     "arjun",
+    "assetfinder",
     "brutespray",
     "cf-check",
     "cmseek",
     "corsy",
     "dirsearch",
+    "dnsx",
     "dnsgen",
     "dnsrecon",
     "emailfinder",
     "ffuf",
+    "gau",
     "getjswords",
     "gf",
     "gitdorker",
     "github-subdomains",
+    "gospider",
+    "gotator",
+    "gowitness",
     "h8mail",
+    "hakrawler",
+    "httpx",
+    "interactsh-client",
     "jsa",
+    "katana",
     "linkfinder",
     "metafinder",
     "nmap",
+    "nuclei",
     "openredirex",
     "oralyzer",
     "ppfuzz",
+    "puredns",
     "reconftw",
     "s3scanner",
+    "subfinder",
+    "subjs",
     "testssl",
     "theharvester",
     "udork",
+    "unimap",
+    "waybackurls",
     "webscreenshot",
   ],
   extras: [
+    "amass",
+    "anew",
     "aquatone",
     "arjun",
+    "assetfinder",
     "aws-cli",
     "cero",
+    "chaos-client",
     "cloud_enum",
     "commix",
+    "crlfuzz",
+    "dalfox",
     "dirsearch",
+    "dnsx",
     "dnsvalidator",
     "droopescan",
+    "feroxbuster",
     "ffuf",
+    "gau",
+    "gauplus",
+    "gobuster",
+    "gospider",
+    "gowitness",
+    "gxss",
+    "hakrawler",
+    "hakrevdns",
+    "httprobe",
+    "httpx",
+    "interactsh-client",
     "ipcdn",
+    "jaeles",
+    "katana",
+    "kiterunner",
+    "kxss",
     "linkfinder",
     "masscan",
+    "massdns",
     "meg",
+    "naabu",
     "nmap",
+    "nuclei",
+    "puredns",
+    "rustscan",
     "s3scanner",
     "scrying",
     "secretfinder",
+    "shuffledns",
     "sqlmap",
+    "subfinder",
+    "subjs",
     "testssl",
+    "tlsx",
     "trufflehog",
+    "unimap",
     "wafw00f",
+    "waybackurls",
     "webscreenshot",
     "whois",
     "wpscan",
@@ -231,33 +227,20 @@ const PROVISIONER_LABELS: Record<string, string> = {
 const isModuleAvailable = (
   moduleName: string,
   provisioner: string,
-  includeGoTools: boolean,
 ): boolean => {
   if (!provisioner || provisioner === "unknown") return true;
-  const tools = [
-    ...(PROVISIONER_TOOLS[provisioner.toLowerCase()] ?? []),
-    ...(includeGoTools
-      ? (PROVISIONER_GO_TOOLS[provisioner.toLowerCase()] ?? [])
-      : []),
-  ];
+  const tools = PROVISIONER_TOOLS[provisioner.toLowerCase()] ?? [];
   if (!tools.length) return true;
   const mod = moduleName.toLowerCase();
   return tools.some((tool) => mod.includes(tool) || tool.includes(mod));
 };
 
 /** Finds which provisioners include this module (for tooltip text) */
-const getRequiredProvisioners = (
-  moduleName: string,
-  includeGoTools: boolean,
-): string[] => {
+const getRequiredProvisioners = (moduleName: string): string[] => {
   return Object.entries(PROVISIONER_TOOLS)
-    .filter(([key, tools]) => {
+    .filter(([, tools]) => {
       const mod = moduleName.toLowerCase();
-      const allTools = [
-        ...tools,
-        ...(includeGoTools ? (PROVISIONER_GO_TOOLS[key] ?? []) : []),
-      ];
-      return allTools.some((t) => mod.includes(t) || t.includes(mod));
+      return tools.some((t) => mod.includes(t) || t.includes(mod));
     })
     .map(([key]) => PROVISIONER_LABELS[key] ?? key);
 };
@@ -298,8 +281,6 @@ export default function ScanLauncher({
   const [detectedProvisioner, setDetectedProvisioner] =
     useState<string>("unknown");
   const [provisioner, setProvisioner] = useState<string>("unknown");
-  const [includeGoTools, setIncludeGoTools] = useState(false);
-  const [showGoToolsInfo, setShowGoToolsInfo] = useState(false);
 
   // ax scan fleet control options
   const [spinup, setSpinup] = useState("");
@@ -313,6 +294,10 @@ export default function ScanLauncher({
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [gowitnesWarn, setGowitnesWarn] = useState<{ bare: string[] } | null>(
+    null,
+  );
+  const [gowitnesRmWarn, setGowitnesRmWarn] = useState(false);
 
   useEffect(() => {
     fetchModules();
@@ -365,27 +350,8 @@ export default function ScanLauncher({
     }
   };
 
-  const handleLaunchScan = async () => {
-    setError("");
-    setSuccess("");
-
-    // Debug logging
-    console.log("[ScanLauncher] Form validation check:");
-    console.log("  scanName:", scanName, "isEmpty:", !scanName);
-    console.log("  targets:", targets, "isEmpty:", !targets);
-    console.log("  module:", module, "isEmpty:", !module);
-
-    if (!scanName || !targets || !module) {
-      const missing = [];
-      if (!scanName) missing.push("scan name");
-      if (!targets) missing.push("targets");
-      if (!module) missing.push("module");
-      const errorMsg = `Please fill in: ${missing.join(", ")}`;
-      console.log("[ScanLauncher] Validation failed:", errorMsg);
-      setError(errorMsg);
-      return;
-    }
-
+  // Core launch logic — no URL checks, called directly after user confirms dialogs
+  const doLaunchScan = async () => {
     setLaunching(true);
 
     try {
@@ -497,6 +463,33 @@ export default function ScanLauncher({
     }
   };
 
+  const handleLaunchScan = () => {
+    setError("");
+    setSuccess("");
+    if (!scanName || !targets || !module) {
+      const missing: string[] = [];
+      if (!scanName) missing.push("scan name");
+      if (!targets) missing.push("targets");
+      if (!module) missing.push("module");
+      setError(`Please fill in: ${missing.join(", ")}`);
+      return;
+    }
+    if (module.toLowerCase().includes("gowitness")) {
+      const lines = targets
+        .split("\n")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const bare = lines.filter(
+        (t) => !t.startsWith("http://") && !t.startsWith("https://"),
+      );
+      if (bare.length > 0) {
+        setGowitnesWarn({ bare });
+        return;
+      }
+    }
+    doLaunchScan();
+  };
+
   return (
     <Card className="bg-slate-800 border-slate-700">
       <CardHeader>
@@ -528,28 +521,125 @@ export default function ScanLauncher({
           </Alert>
         )}
 
-        {/* Go Tools Info Banner */}
-        {showGoToolsInfo && (
-          <Alert className="bg-blue-950/50 border-blue-700 text-blue-200 relative pr-10">
-            <AlertCircle className="h-4 w-4 text-blue-400" />
-            <AlertDescription className="text-sm">
-              <span className="font-semibold text-blue-300">
-                Go tools enabled. These tools are only available on images built
-                with Go support. If your fleet image was not provisioned with
-                Go, modules relying on Go binaries will fail at runtime. Make
-                sure your packer image includes the Go toolchain.
-              </span>
-            </AlertDescription>
-            <button
-              onClick={() => setShowGoToolsInfo(false)}
-              className="absolute top-2 right-2 text-blue-400 hover:text-blue-200 transition-colors"
-              aria-label="Dismiss"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </Alert>
+        {/* Gowitness URL warning dialog */}
+        {gowitnesWarn && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-dark-800 border border-yellow-500/40 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+              <div className="flex items-start gap-3 mb-4">
+                <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-bold text-white font-mono mb-1">
+                    Gowitness requires full URLs
+                  </h3>
+                  <p className="text-xs text-white-400">
+                    Gowitness needs targets in the form{" "}
+                    <code className="text-yellow-300 bg-dark-900 px-1 rounded">
+                      https://example.com
+                    </code>
+                    . The following {gowitnesWarn.bare.length} target
+                    {gowitnesWarn.bare.length > 1 ? "s are" : " is"} missing a
+                    protocol:
+                  </p>
+                  <ul className="mt-2 max-h-32 overflow-y-auto space-y-0.5">
+                    {gowitnesWarn.bare.map((t) => (
+                      <li
+                        key={t}
+                        className="text-xs font-mono text-yellow-300 bg-dark-900 px-2 py-0.5 rounded"
+                      >
+                        {t}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-white-500 mt-2">
+                    Auto-fix will prefix them with{" "}
+                    <code className="text-cyan-300 bg-dark-900 px-1 rounded">
+                      https://
+                    </code>{" "}
+                    (port 443).
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setGowitnesWarn(null)}
+                  className="px-3 py-1.5 text-xs rounded border border-dark-600 text-white-400 hover:text-white hover:border-dark-500 transition-colors font-mono"
+                >
+                  Go back &amp; fix
+                </button>
+                <button
+                  onClick={() => {
+                    setGowitnesWarn(null);
+                    doLaunchScan();
+                  }}
+                  className="px-3 py-1.5 text-xs rounded border border-dark-600 text-white-500 hover:text-white transition-colors font-mono"
+                >
+                  Ignore &amp; launch anyway
+                </button>
+                <button
+                  onClick={() => {
+                    const fixed = targets
+                      .split("\n")
+                      .map((t) => {
+                        const trimmed = t.trim();
+                        if (!trimmed) return t;
+                        if (
+                          !trimmed.startsWith("http://") &&
+                          !trimmed.startsWith("https://")
+                        ) {
+                          return `https://${trimmed}`;
+                        }
+                        return t;
+                      })
+                      .join("\n");
+                    setTargets(fixed);
+                    setGowitnesWarn(null);
+                  }}
+                  className="px-3 py-1.5 text-xs rounded bg-yellow-600 hover:bg-yellow-500 text-white font-mono transition-colors"
+                >
+                  Auto-fix with https://
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
+        {/* Gowitness rm-when-done warning */}
+        {gowitnesRmWarn && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-dark-800 border border-orange-500/40 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+              <div className="flex items-start gap-3 mb-4">
+                <AlertCircle className="w-5 h-5 text-orange-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-bold text-white font-mono mb-1">
+                    ⚠️ Keep instances alive for gowitness
+                  </h3>
+                  <p className="text-xs text-white-400 leading-relaxed">
+                    <strong className="text-orange-300">
+                      rm-when-done has been automatically disabled.
+                    </strong>{" "}
+                    Gowitness stores screenshots and its SQLite database on the
+                    instances. If instances are destroyed before the dashboard
+                    downloads them, all screenshots will be lost.
+                  </p>
+                  <p className="text-xs text-white-500 mt-2">
+                    After the scan finishes, use the{" "}
+                    <span className="text-cyan-300 font-mono">Fleet</span> tab
+                    to SSH in, download the results, then manually remove
+                    instances.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setGowitnesRmWarn(false)}
+                  className="px-4 py-1.5 text-xs rounded bg-orange-700 hover:bg-orange-600 text-white font-mono transition-colors"
+                >
+                  Got it
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Provisioner / Image Filter */}
         <div className="bg-dark-800/60 border border-dark-700 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
@@ -600,35 +690,6 @@ export default function ScanLauncher({
                 </button>
               )}
           </div>
-
-          {/* Go Tools Toggle */}
-          <div className="flex items-center gap-3 pt-2 border-t border-dark-700/60 mt-2">
-            <Checkbox
-              id="includeGoTools"
-              checked={includeGoTools}
-              onCheckedChange={(checked) => {
-                setIncludeGoTools(!!checked);
-                if (checked) setShowGoToolsInfo(true);
-              }}
-            />
-            <div>
-              <label
-                htmlFor="includeGoTools"
-                className="text-[13px] font-medium cursor-pointer text-slate-300"
-              >
-                Include Go-based tools
-              </label>
-              <p className="text-[13px] text-dark-400 mt-0.5">
-                Only enable if your fleet image was built with Go support.{" "}
-                {provisioner !== "unknown" && (
-                  <span className="text-blue-400">
-                    +{PROVISIONER_GO_TOOLS[provisioner]?.length ?? 0} additional
-                    tools for {PROVISIONER_LABELS[provisioner] ?? provisioner}
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
         </div>
 
         <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 space-y-6">
@@ -645,10 +706,22 @@ export default function ScanLauncher({
               className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5"
             />
             <p className="text-xs text-slate-500 mt-1.5">
-              Results will be saved as{" "}
-              <span className="text-primary-400 font-mono">
-                {scanName || "scan-name"}-{module || "module"}.txt
-              </span>
+              {module.toLowerCase().includes("gowitness") ? (
+                <>
+                  Output:{" "}
+                  <span className="text-primary-400 font-mono">
+                    {module || "module"}+&lt;timestamp&gt;/
+                  </span>{" "}
+                  — screenshots + sqlite DB on the instance
+                </>
+              ) : (
+                <>
+                  Results will be saved as{" "}
+                  <span className="text-primary-400 font-mono">
+                    {scanName || "scan-name"}-{module || "module"}.txt
+                  </span>
+                </>
+              )}
             </p>
           </div>
 
@@ -696,7 +769,20 @@ export default function ScanLauncher({
             </Label>
             {modules.length > 0 ? (
               <>
-                <Select value={module} onValueChange={setModule}>
+                <Select
+                  value={module}
+                  onValueChange={(val) => {
+                    setModule(val);
+                    if (val.toLowerCase().includes("gowitness")) {
+                      if (rmWhenDone) {
+                        setRmWhenDone(false);
+                        setGowitnesRmWarn(true);
+                      } else {
+                        setGowitnesRmWarn(true);
+                      }
+                    }
+                  }}
+                >
                   <SelectTrigger
                     id="module"
                     className="bg-slate-900 border-slate-700 text-white mt-1.5 hover:bg-slate-800 transition-colors"
@@ -706,11 +792,10 @@ export default function ScanLauncher({
                   <SelectContent className="bg-slate-900 border-slate-700 text-white">
                     {(() => {
                       const available = modules.filter((m) =>
-                        isModuleAvailable(m, provisioner, includeGoTools),
+                        isModuleAvailable(m, provisioner),
                       );
                       const unavailable = modules.filter(
-                        (m) =>
-                          !isModuleAvailable(m, provisioner, includeGoTools),
+                        (m) => !isModuleAvailable(m, provisioner),
                       );
                       return (
                         <>
@@ -721,7 +806,7 @@ export default function ScanLauncher({
                                   Available —{" "}
                                   {PROVISIONER_LABELS[provisioner] ??
                                     provisioner}{" "}
-                                  image{includeGoTools ? " (incl. Go)" : ""}
+                                  image
                                 </SelectLabel>
                               )}
                               {available.map((mod) => (
@@ -737,21 +822,14 @@ export default function ScanLauncher({
                                 Not in{" "}
                                 {PROVISIONER_LABELS[provisioner] ?? provisioner}{" "}
                                 image
-                                {!includeGoTools
-                                  ? " (try enabling Go tools)"
-                                  : ""}
                               </SelectLabel>
                               {unavailable.map((mod) => {
-                                const needed = getRequiredProvisioners(
-                                  mod,
-                                  includeGoTools,
-                                );
+                                const needed = getRequiredProvisioners(mod);
                                 return (
                                   <SelectItem
                                     key={mod}
                                     value={mod}
-                                    disabled
-                                    className="opacity-40"
+                                    className="opacity-50 italic"
                                   >
                                     {mod}
                                     {needed.length > 0 && (
@@ -772,7 +850,7 @@ export default function ScanLauncher({
                 {provisioner !== "unknown" &&
                   (() => {
                     const unavailCount = modules.filter(
-                      (m) => !isModuleAvailable(m, provisioner, includeGoTools),
+                      (m) => !isModuleAvailable(m, provisioner),
                     ).length;
                     return unavailCount > 0 ? (
                       <p className="text-[13px] text-dark-500 mt-1.5 flex items-center gap-1">
@@ -783,11 +861,6 @@ export default function ScanLauncher({
                           {PROVISIONER_LABELS[provisioner] ?? provisioner}
                         </span>{" "}
                         image
-                        {!includeGoTools && (
-                          <span className="text-blue-400 ml-1">
-                            (enable Go tools to unlock more)
-                          </span>
-                        )}
                       </p>
                     ) : (
                       <p className="text-[13px] text-success-400 mt-1.5">

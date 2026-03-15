@@ -496,21 +496,21 @@ export default function FleetControl({
                         {instance.name}
                       </TableCell>
                       <TableCell>{getStatusBadge(instance.status)}</TableCell>
-                      <TableCell className="font-mono text-sm">
+                      <TableCell className="font-mono text-[13px]">
                         {instance.ip}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">{instance.provider}</Badge>
                       </TableCell>
                       <TableCell>{instance.region}</TableCell>
-                      <TableCell className="text-sm text-slate-400">
+                      <TableCell className="text-[13px] text-slate-400">
                         {instance.instanceType}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
                           <Button
                             variant="ghost"
-                            size="sm"
+                            //size="sm"
                             onClick={() => copySSHCommand(instance.name)}
                             title="Copy SSH command"
                           >
@@ -518,7 +518,7 @@ export default function FleetControl({
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
+                            //size="sm"
                             onClick={() =>
                               handlePowerControl("off", instance.name)
                             }
@@ -529,7 +529,7 @@ export default function FleetControl({
                           {onHide && (
                             <Button
                               variant="ghost"
-                              size="sm"
+                              //size="sm"
                               onClick={() => onHide(instance.id)}
                               title="Hide from list (not deleted)"
                               className="text-slate-500 hover:text-amber-400"
@@ -539,7 +539,7 @@ export default function FleetControl({
                           )}
                           <Button
                             variant="ghost"
-                            size="sm"
+                            //size="sm"
                             onClick={() =>
                               showConfirmDialog(
                                 `Terminate ${instance.name}`,

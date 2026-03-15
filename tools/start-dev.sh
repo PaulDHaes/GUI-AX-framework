@@ -2,12 +2,13 @@
 # Local development startup script
 # Starts: Axiom bridge (port 5000) and Vite dev server (port 3000)
 # The bridge handles import watching natively — no separate watcher needed.
-#
-# 🐳 For Docker, use instead:
-#   docker compose up --build
-#   (exposes the same ports: 3000 for UI, 5000 for bridge)
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+echo "Stopping any running bridge/vite processes..."
+pkill -f "axiom-bridge.py" 2>/dev/null
+pkill -f "vite" 2>/dev/null
+sleep 1
 
 echo "Starting Axiom bridge on port 5000..."
 python3 "$APP_DIR/tools/axiom-bridge.py" &
