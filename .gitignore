@@ -17,6 +17,7 @@ dist-ssr
 .env.local
 .env.*.local
 
+
 # Runtime data
 data/
 imports/processed/
@@ -39,3 +40,4 @@ venv/
 *.sln
 *.sw?
 imports/*
+.github/*

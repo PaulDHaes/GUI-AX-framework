@@ -6,7 +6,7 @@
 
 A React + Flask dashboard for [Ax](https://github.com/attacksurge/ax) — the distributed cloud reconnaissance framework. Turns Ax's CLI tools into a real-time web UI for managing fleets, launching scans, and exploring results.
 
----
+## ![Dashboard Screenshot](./images/dashboard.jpg)
 
 > **⚠️ Tested Environment:** This dashboard has been developed and tested exclusively with **AWS** as the cloud provider. Other providers (DigitalOcean, Azure, Linode, GCP, etc.) are supported by Ax and should work, but have not been verified with this dashboard. If you encounter provider-specific issues, please open an issue.
 
@@ -15,7 +15,8 @@ A React + Flask dashboard for [Ax](https://github.com/attacksurge/ax) — the di
 ## 🚦 Quick Start — from zero to first scan
 
 > **New to Ax too?** Follow every step. Already have Ax configured? Jump to [step 3](#3-start-the-dashboard).
-> **Want to full installation proccesses manualy or using docker** checkout [Installation](#Installation).
+
+> **Want to see the full installation processes manually or using Docker** checkout [Installation](#Installation).
 
 ### 1. Install everything with one command
 
@@ -115,6 +116,10 @@ ax update
 
 Launch distributed scans across your entire cloud fleet with a few clicks. Pick a module (nuclei, amass, nmap, httpx, ffuf, …), enter your targets, configure options, and fire. The UI shows which tools are available per provisioner image (barebones, default, reconftw, etc.) so you only see what's actually installed on your fleet.
 
+## ![scanlauncher-1 Screenshot](./images/run-scan-1.jpg)
+
+## ![scanlauncher-2 Screenshot](./images/run-scan-2.jpg)
+
 > **Tested modules:** The following modules have been verified end-to-end with this dashboard: `nuclei`, `amass`, `subfinder`, `httpx`, `nmap`, `naabu`, `ffuf`, `gowitness`, `dnsx`, `whois`, and `masscan`. Other Ax modules should work but may not have structured output parsing — results will still appear as raw log lines.
 
 ### 🖥️ Fleet Manager
@@ -128,6 +133,10 @@ Real-time monitor for running `axiom-scan` jobs. See live progress, elapsed time
 Each scan runs in a dedicated **tmux session** so it persists independently of the browser. You can attach to any running scan's tmux session from the terminal (`tmux attach -t <scan-session>`) for direct log access.
 
 ### 🔍 Per-scan Output Viewer
+
+## ![vulns Screenshot](./images/vulns.jpg)
+
+## ![outputscan Screenshot](./images/output-scan.jpg)
 
 Deep-dive into any individual scan result:
 
@@ -180,6 +189,8 @@ Built-in local risk scoring for targets based on vulnerability severity, open po
 ### 🔄 Ax Framework Updater
 
 Keep Ax in sync from the dashboard — a dedicated Settings tab shows the current Ax version and lets you pull the latest changes to `~/.axiom` with a single click. The bridge streams git output in real time so you can watch the update happen.
+
+## ![Dashboard Screenshot](./images/system-update.jpg)
 
 ---
 
