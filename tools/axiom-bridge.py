@@ -2102,7 +2102,7 @@ def get_scan(scan_id):
                 "output_files": output_files,
                 "output": output_dir if output_files else None,
                 "local_logs": logs_dir if os.path.exists(logs_dir) else (log_file if os.path.exists(log_file) else None),
-                "logs": logs,
+                # "logs": logs,  # Removed: logs will be fetched separately via /logs endpoint
                 "results": results_count,
                 "progress": min(95, (results_count // 10) if results_count else 0) if is_running else 100,
             }
@@ -2199,45 +2199,42 @@ def get_scan_targets(scan_id):
 
 @app.route("/api/axiom/scans/<scan_id>/logs", methods=["GET"])
 def get_scan_logs(scan_id):
-    """Get logs for a specific scan from local_logs or remote_logs path"""
-    scans = load_scans()
-    scan = None
-    for s in scans:
-        if s.get("id") == scan_id:
-            scan = s
-            break
-    
-    if not scan:
-        return jsonify({"error": "Scan not found"}), 404
-    
+    """Get logs for a specific scan from ~/.axiom/logs/{scan_id}/logs/ directory"""
     logs = []
-    log_path = None
     
-    # Try local_logs first, then remote_logs
-    for path_key in ["local_logs", "remote_logs"]:
-        path = scan.get(path_key, "")
-        if path and os.path.exists(path):
-            log_path = path
-            print(f"[logs] Reading logs from {path_key}: {path}")
-            break
+    # Find the scan folder
+    folder, _ = _find_scan_folder(scan_id)
+    if not folder:
+        return jsonify({"logs": [], "error": "Scan folder not found"}), 404
     
-    if not log_path:
-        print(f"[logs] No log file found for scan {scan_id}")
-        print(f"[logs]   local_logs: {scan.get('local_logs', 'N/A')}")
-        print(f"[logs]   remote_logs: {scan.get('remote_logs', 'N/A')}")
-        return jsonify({"logs": [], "error": "No log file found", "scan": scan})
+    # Look for logs in the logs/ subdirectory
+    logs_dir = os.path.join(folder, "logs")
+    if not os.path.isdir(logs_dir):
+        return jsonify({"logs": [], "error": "Logs directory not found", "path": logs_dir}), 404
     
+    # Find all files in the logs directory
     try:
+        entries = [f for f in os.listdir(logs_dir) if os.path.isfile(os.path.join(logs_dir, f))]
+        if not entries:
+            return jsonify({"logs": [], "error": "No log files in directory", "path": logs_dir}), 404
+        
+        # Use the most recent file (by modification time)
+        latest_file = max(entries, key=lambda f: os.path.getmtime(os.path.join(logs_dir, f)))
+        log_path = os.path.join(logs_dir, latest_file)
+        
+        print(f"[logs] Reading log file: {log_path}")
+        
         with open(log_path, "r") as f:
             content = f.read()
-            # Split by lines and limit to last 1000 lines
-            lines = content.split("\n")
-            logs = lines[-1000:]
+            logs = content.split("\n")
+        
+        # Keep only the last 1000 lines
+        logs = logs[-1000:]
         print(f"[logs] Read {len(logs)} lines from {log_path}")
     except Exception as e:
         print(f"[logs] Failed to read log file: {e}")
-        return jsonify({"logs": [], "error": str(e), "path": log_path}), 500
-    
+        return jsonify({"logs": [], "error": str(e), "path": logs_dir}), 500
+
     return jsonify({
         "logs": logs,
         "scanId": scan_id,

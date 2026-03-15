@@ -1,11 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "./ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import {
@@ -246,10 +240,26 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
   const [scan, setScan] = useState<Scan | null>(null);
   const [loading, setLoading] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const autoScrollRef = useRef(autoScroll);
+  const [rawView, setRawView] = useState(false);
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
   const [expandedShot, setExpandedShot] = useState<Screenshot | null>(null);
   const [logSearch, setLogSearch] = useState("");
 
+  useEffect(() => {
+    autoScrollRef.current = autoScroll;
+  }, [autoScroll]);
+
+  const handleOutputScroll = () => {
+    const el = outputRef.current;
+    if (!el) return;
+
+    // If the user scrolls away from the bottom, stop auto-scrolling.
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    if (atBottom !== autoScrollRef.current) {
+      setAutoScroll(atBottom);
+    }
+  };
   // Per-category filter states
   const [statusFilter, setStatusFilter] = useState<Set<number>>(new Set());
   const [stateFilter, setStateFilter] = useState<Set<string>>(new Set());
@@ -261,8 +271,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
   useEffect(() => {
     if (!scanId) return;
     fetchScanDetails();
-    const interval = setInterval(fetchScanDetails, 3000);
-    return () => clearInterval(interval);
+    // Removed auto-refresh interval - now only fetches on load
   }, [scanId]);
 
   useEffect(() => {
@@ -281,6 +290,12 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
       if (response.ok) {
         const data = await response.json();
         setScan(data);
+
+        const hasLogs = Array.isArray(data.logs) ? data.logs.length > 0 : false;
+        if (!hasLogs) {
+          fetchScanLogs(data.id || scanId);
+        }
+
         const cat = getScanCategory(data.module || "");
         if (cat === "screenshot") fetchScreenshots(data.id);
       }
@@ -288,6 +303,22 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
       console.error("Failed to fetch scan details:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchScanLogs = async (id: string) => {
+    try {
+      const r = await fetch(
+        `${apiUrl}/api/axiom/scans/${encodeURIComponent(id)}/logs`,
+      );
+      if (r.ok) {
+        const data = await r.json();
+        if (data?.logs) {
+          setScan((prev) => (prev ? { ...prev, logs: data.logs } : prev));
+        }
+      }
+    } catch {
+      /* ignore */
     }
   };
 
@@ -534,13 +565,13 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                 <CardTitle className="text-white text-xl">
                   {scan.name}
                 </CardTitle>
-                <CardDescription className="flex items-center gap-2 mt-1">
+                <div className="text-sm text-slate-400 flex items-center gap-2 mt-1">
                   <CategoryIcon />
                   <Badge variant="outline" className="text-xs">
                     {scan.module}
                   </Badge>
                   <span className="text-slate-500 text-xs">{category}</span>
-                </CardDescription>
+                </div>
               </div>
             </div>
             <Badge className={`${getStatusBadgeColor()} border`}>
@@ -737,6 +768,36 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => setRawView((prev) => !prev)}
+                className="text-xs"
+                title={rawView ? "Show parsed results" : "Show raw log"}
+              >
+                {rawView ? (
+                  <Terminal className="w-3 h-3 mr-1" />
+                ) : (
+                  <Terminal className="w-3 h-3 mr-1" />
+                )}
+                {rawView ? "Parsed" : "Raw"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAutoScroll((prev) => !prev)}
+                className="text-xs"
+                title={
+                  autoScroll ? "Auto-scroll enabled" : "Auto-scroll paused"
+                }
+              >
+                {autoScroll ? (
+                  <ChevronDown className="w-3 h-3 mr-1" />
+                ) : (
+                  <ChevronUp className="w-3 h-3 mr-1" />
+                )}
+                {autoScroll ? "Auto" : "Pause"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={downloadLogs}
                 disabled={!scan.logs?.length}
                 className="text-xs"
@@ -911,9 +972,23 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
 
         <CardContent className="pt-0">
           {/* ── Structured result rows ── */}
-          {displayLines.length > 0 ? (
+          {rawView ? (
             <div
               ref={outputRef}
+              onScroll={handleOutputScroll}
+              className="bg-slate-950 border border-slate-700 rounded-lg overflow-y-auto"
+              style={{
+                maxHeight: category === "screenshot" ? "28rem" : "36rem",
+              }}
+            >
+              <pre className="m-0 p-3 text-xs font-mono whitespace-pre-wrap break-words">
+                {scan?.logs?.join("\n")}
+              </pre>
+            </div>
+          ) : displayLines.length > 0 ? (
+            <div
+              ref={outputRef}
+              onScroll={handleOutputScroll}
               className="bg-slate-950 border border-slate-700 rounded-lg overflow-y-auto"
               style={{
                 maxHeight: category === "screenshot" ? "28rem" : "36rem",
