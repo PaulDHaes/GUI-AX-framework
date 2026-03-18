@@ -162,7 +162,7 @@ Supported formats imported automatically:
 | dnsx | JSON / plain text |
 | subfinder | JSON |
 | whois | plain text (`.dir` batch folders) |
-| gowitness | plain text |
+| gowitness | sqlite |
 | ffuf | JSON |
 
 ### ✅ Tested Modules & Provider
@@ -436,6 +436,10 @@ gui-ax-framework/
 ├── services/
 │   └── axiomProvider.ts     # Bridge API client / state provider
 ├── tools/
+|   |── importers/
+|       |── import_gowitness.py # Import Gowitness data
+|       |── import_nuclei.py    # Import Nuclei data
+|       └── import_....py       # Import all other data
 │   ├── axiom-bridge.py      # Flask API + file watcher (main backend)
 │   ├── gui-ax-install.sh    # One-liner installer
 │   ├── ax-update.sh         # Pull latest Ax framework (~/.axiom)
@@ -474,6 +478,9 @@ Key endpoints exposed by `axiom-bridge.py`:
 | `GET`    | `/api/axiom/targets`                   | List all targets                    |
 | `DELETE` | `/api/axiom/targets/<id>`              | Delete a target                     |
 | `GET`    | `/api/axiom/update`                    | Stream Ax framework git pull output |
+| `GET`    | `/api/axiom/vuln`                      | List all vulnerabilties             |
+| `GET`    | `/api/axiom/docs`                      | Get information what this can do    |
+
 
 ---
 
