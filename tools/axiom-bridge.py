@@ -375,6 +375,35 @@ def scan_imports_dir(verbose: bool = True) -> int:
                     and f.name not in existing_sources
                 ]
                 if not db_files:
+                    # No DB — check for JPEG/PNG screenshot-only folders (axiom-scan gowitness output)
+                    jpeg_files = [
+                        f for f in gw_dir.iterdir()
+                        if f.is_file() and f.suffix.lower() in ('.jpeg', '.jpg', '.png')
+                        and gw_dir.name not in existing_sources
+                    ]
+                    if jpeg_files:
+                        if verbose:
+                            print(f"[watcher] Processing JPEG-only gowitness folder in imports/: {gw_dir.name} ({len(jpeg_files)} images)")
+                        try:
+                            from importers.import_gowitness import parse_jpeg_folder
+                            _jpeg_key = gw_dir.name.rstrip('.')
+                            try:
+                                with open(SCANS_STORE, "r") as _sf:
+                                    _jpeg_stored = json.load(_sf)
+                                _jpeg_nm = {s["id"]: s.get("name", "") for s in _jpeg_stored if s.get("id") and s.get("name")}
+                                _jpeg_display = _jpeg_nm.get(_jpeg_key) or _jpeg_nm.get(gw_dir.name) or None
+                            except Exception:
+                                _jpeg_display = None
+                            store = load_store()
+                            t = store.get("targets", [])
+                            t, _changed = parse_jpeg_folder(gw_dir, gw_dir.name, t, display_name=_jpeg_display)
+                            if _changed:
+                                store["targets"] = t
+                                save_store(store)
+                                new_files += 1
+                        except Exception as e:
+                            print(f"[watcher] Error processing JPEG-only folder {gw_dir.name}: {e}")
+                            traceback.print_exc()
                     continue
                 for db_file in db_files:
                     if verbose:

@@ -74,6 +74,19 @@ interface ParsedLine {
   path?: string;
 }
 
+/** Grouped host with open ports (nmap / masscan / naabu / rustscan) */
+interface NmapHost {
+  hostname: string;
+  ip?: string;
+  ports: Array<{
+    port: number;
+    proto: string;
+    state: string;
+    service: string;
+    banner?: string;
+  }>;
+}
+
 type ScanCategory =
   | "screenshot"
   | "http"
@@ -140,6 +153,25 @@ function parseLine(raw: string, cat: ScanCategory): ParsedLine {
   const line = raw.trim();
   switch (cat) {
     case "http": {
+      // Try httpx -json output first
+      try {
+        const j = JSON.parse(line);
+        if (j.url || j["final-url"]) {
+          return {
+            raw,
+            url: j.url || j["final-url"],
+            statusCode:
+              j["status-code"] ?? j.statusCode ?? j.status ?? undefined,
+            title: j.title || undefined,
+            size:
+              j["content-length"] ??
+              j["content_length"] ??
+              j.length ??
+              undefined,
+          } as ParsedLine;
+        }
+      } catch {}
+      // Structured httpx output: https://host [200] [Title] [tech] [size]
       const m = RE_HTTPX.exec(line);
       if (m)
         return {
@@ -147,9 +179,10 @@ function parseLine(raw: string, cat: ScanCategory): ParsedLine {
           url: m[1],
           statusCode: parseInt(m[2]),
           title: m[3] || undefined,
-          tech: m[4] ? m[4].split(",").map((s) => s.trim()) : undefined,
           size: m[5] ? parseInt(m[5]) : undefined,
         } as ParsedLine;
+      // Plain URL (httprobe / httpx default output)
+      if (/^https?:\/\/\S+$/.test(line)) return { raw, url: line };
       break;
     }
     case "port": {
@@ -191,6 +224,105 @@ function parseLine(raw: string, cat: ScanCategory): ParsedLine {
       break;
   }
   return { raw };
+}
+
+/** Parse nmap / masscan / naabu / rustscan output into grouped host → ports */
+function parseNmapHosts(logs: string[]): NmapHost[] {
+  const hosts: NmapHost[] = [];
+  let cur: NmapHost | null = null;
+
+  for (const raw of logs) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    // "Nmap scan report for hostname" or "Nmap scan report for hostname (ip)"
+    const hostM = /^Nmap scan report for (.+?)(?:\s+\((.+?)\))?$/.exec(line);
+    if (hostM) {
+      if (cur) hosts.push(cur);
+      cur = { hostname: hostM[1], ip: hostM[2], ports: [] };
+      continue;
+    }
+
+    // masscan / rustscan: "Discovered open port 80/tcp on 1.2.3.4"
+    const discM = /^Discovered open port (\d+)\/(tcp|udp) on (.+)$/.exec(line);
+    if (discM) {
+      const addr = discM[3].trim();
+      let h = hosts.find((x) => x.hostname === addr || x.ip === addr);
+      if (!h) {
+        h = { hostname: addr, ports: [] };
+        hosts.push(h);
+      }
+      h.ports.push({
+        port: parseInt(discM[1]),
+        proto: discM[2],
+        state: "open",
+        service: "",
+      });
+      continue;
+    }
+
+    // naabu: "host:port" lines
+    const naabuM = /^([a-zA-Z0-9.\-_]+):(\d+)$/.exec(line);
+    if (naabuM && !cur) {
+      const addr = naabuM[1];
+      let h = hosts.find((x) => x.hostname === addr || x.ip === addr);
+      if (!h) {
+        h = { hostname: addr, ports: [] };
+        hosts.push(h);
+      }
+      h.ports.push({
+        port: parseInt(naabuM[2]),
+        proto: "tcp",
+        state: "open",
+        service: "",
+      });
+      continue;
+    }
+
+    // Standard nmap port line: "80/tcp  open  http  Apache"
+    const portM = RE_NMAP.exec(line);
+    if (portM && cur) {
+      cur.ports.push({
+        port: parseInt(portM[1]),
+        proto: portM[2],
+        state: portM[3],
+        service: portM[4],
+        banner: portM[5]?.trim() || undefined,
+      });
+    }
+  }
+  if (cur) hosts.push(cur);
+  return hosts.filter((h) => h.ports.length > 0);
+}
+
+/** Extract deduplicated hostnames from subdomain / DNS tool output */
+function parseDnsHostnames(logs: string[]): string[] {
+  const RE_HOST =
+    /^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$/i;
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of logs) {
+    const line = raw.trim();
+    if (!line) continue;
+    // Handle dnsx / amass JSON: {"host":"sub.example.com",...}
+    try {
+      const j = JSON.parse(line);
+      const h: string =
+        j.host || j.hostname || j.name || j.input || j.subdomain || "";
+      if (h && RE_HOST.test(h) && !seen.has(h)) {
+        seen.add(h);
+        result.push(h);
+        continue;
+      }
+    } catch {}
+    // Plain hostname (first token, strip trailing dot)
+    const candidate = line.split(/\s+/)[0].replace(/\.$/, "").toLowerCase();
+    if (RE_HOST.test(candidate) && !seen.has(candidate)) {
+      seen.add(candidate);
+      result.push(candidate);
+    }
+  }
+  return result;
 }
 
 function statusColor(code: number): string {
@@ -428,6 +560,47 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
     showOpenOnly,
     logSearch,
   ]);
+
+  // Grouped host → ports for port-scan modules
+  const nmapHosts = useMemo<NmapHost[]>(() => {
+    if (category !== "port" || !scan?.logs) return [];
+    return parseNmapHosts(scan.logs);
+  }, [scan?.logs, category]);
+
+  const filteredNmapHosts = useMemo<NmapHost[]>(() => {
+    return nmapHosts
+      .map((h) => ({
+        ...h,
+        ports: h.ports.filter((p) => {
+          if (showOpenOnly && p.state !== "open") return false;
+          if (stateFilter.size > 0 && !stateFilter.has(p.state)) return false;
+          return true;
+        }),
+      }))
+      .filter((h) => {
+        if (logSearch) {
+          const q = logSearch.toLowerCase();
+          if (
+            !h.hostname.toLowerCase().includes(q) &&
+            !(h.ip || "").includes(q)
+          )
+            return false;
+        }
+        return h.ports.length > 0;
+      });
+  }, [nmapHosts, showOpenOnly, stateFilter, logSearch]);
+
+  // Clean deduplicated hostname list for DNS / subdomain modules
+  const dnsHostnames = useMemo<string[]>(() => {
+    if (category !== "dns" || !scan?.logs) return [];
+    return parseDnsHostnames(scan.logs);
+  }, [scan?.logs, category]);
+
+  const filteredDnsHostnames = useMemo<string[]>(() => {
+    if (!logSearch) return dnsHostnames;
+    const q = logSearch.toLowerCase();
+    return dnsHostnames.filter((h) => h.includes(q));
+  }, [dnsHostnames, logSearch]);
 
   const displayLines = category === "generic" ? parsedLines : filteredLines;
   const activeFilterCount =
@@ -1066,52 +1239,75 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                   </tbody>
                 </table>
               ) : category === "port" ? (
-                // Port scan table
-                <table className="w-full text-xs font-mono">
-                  <thead className="sticky top-0 bg-slate-900 border-b border-slate-700">
-                    <tr>
-                      <th className="px-3 py-2 text-left text-slate-400 font-semibold w-24">
-                        Port
-                      </th>
-                      <th className="px-3 py-2 text-left text-slate-400 font-semibold w-24">
-                        State
-                      </th>
-                      <th className="px-3 py-2 text-left text-slate-400 font-semibold">
-                        Service
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {displayLines.map((l, i) =>
-                      l.port !== undefined ? (
-                        <tr
-                          key={i}
-                          className="border-b border-slate-800/60 hover:bg-slate-800/30"
-                        >
-                          <td className="px-3 py-1.5 text-cyan-300 font-bold">
-                            {l.port}/{l.proto || "tcp"}
-                          </td>
-                          <td className="px-3 py-1.5">
-                            <span
-                              className={`px-1.5 py-0.5 rounded border text-xs ${portStateColor(l.state || "")}`}
-                            >
-                              {l.state}
+                filteredNmapHosts.length > 0 ? (
+                  // Grouped host → open-port badges
+                  <div className="space-y-2 p-2">
+                    {filteredNmapHosts.map((host, i) => (
+                      <div
+                        key={i}
+                        className="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden"
+                      >
+                        <div className="flex items-center justify-between px-3 py-2 bg-slate-800/60 border-b border-slate-700">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-mono text-cyan-300 font-bold">
+                              {host.hostname}
                             </span>
-                          </td>
-                          <td className="px-3 py-1.5 text-slate-300">
-                            {l.service || ""}
-                          </td>
-                        </tr>
-                      ) : (
-                        <tr key={i} className="border-b border-slate-800/30">
-                          <td colSpan={3} className="px-3 py-1 text-slate-500">
-                            {l.raw}
-                          </td>
-                        </tr>
-                      ),
-                    )}
-                  </tbody>
-                </table>
+                            {host.ip && host.ip !== host.hostname && (
+                              <span className="text-xs text-slate-500 font-mono">
+                                {host.ip}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-slate-500 font-mono">
+                            {
+                              host.ports.filter((p) => p.state === "open")
+                                .length
+                            }{" "}
+                            open port
+                            {host.ports.filter((p) => p.state === "open")
+                              .length !== 1
+                              ? "s"
+                              : ""}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 p-2.5">
+                          {host.ports.map((p, pi) => (
+                            <span
+                              key={pi}
+                              title={p.banner || p.service}
+                              className={`px-2 py-0.5 rounded border text-xs font-mono font-semibold ${portStateColor(p.state)}`}
+                            >
+                              {p.port}
+                              <span className="opacity-50">/{p.proto}</span>
+                              {p.service &&
+                                p.service !== "unknown" &&
+                                p.service !== "" && (
+                                  <span className="ml-1 opacity-70 font-normal">
+                                    {p.service}
+                                  </span>
+                                )}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  // Fallback: raw lines when host-grouping yields nothing
+                  <div className="p-3 space-y-0.5">
+                    {displayLines.map((l, i) => (
+                      <div
+                        key={i}
+                        className="text-xs font-mono text-slate-300 leading-5"
+                      >
+                        <span className="text-slate-700 mr-2 select-none">
+                          [{i + 1}]
+                        </span>
+                        {l.raw}
+                      </div>
+                    ))}
+                  </div>
+                )
               ) : category === "vuln" ? (
                 // Nuclei findings table
                 <table className="w-full text-xs font-mono">
@@ -1159,8 +1355,50 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                     )}
                   </tbody>
                 </table>
+              ) : category === "dns" && filteredDnsHostnames.length > 0 ? (
+                // DNS / subdomain results — deduplicated hostname grid
+                <div>
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700 bg-slate-900/60 sticky top-0">
+                    <span className="text-xs text-slate-500 font-mono">
+                      {filteredDnsHostnames.length} hostname
+                      {filteredDnsHostnames.length !== 1 ? "s" : ""}
+                      {logSearch ? ` matching "${logSearch}"` : ""}
+                    </span>
+                    <button
+                      onClick={() =>
+                        navigator.clipboard.writeText(
+                          filteredDnsHostnames.join("\n"),
+                        )
+                      }
+                      className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
+                    >
+                      <Copy className="w-3 h-3" /> Copy all
+                    </button>
+                  </div>
+                  <div className="p-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-0.5">
+                    {filteredDnsHostnames.map((h, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-2 text-xs font-mono text-emerald-300 px-2 py-1 hover:bg-slate-800/40 rounded group"
+                      >
+                        <span className="text-slate-700 select-none w-6 text-right flex-shrink-0">
+                          {i + 1}
+                        </span>
+                        <span className="flex-1 truncate" title={h}>
+                          {h}
+                        </span>
+                        <button
+                          onClick={() => navigator.clipboard.writeText(h)}
+                          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-white transition-opacity flex-shrink-0"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ) : (
-                // Generic / DNS / screenshot module — plain log lines
+                // Generic / screenshot module — plain log lines
                 <div className="p-3 space-y-0.5">
                   {displayLines.map((l, i) => (
                     <div

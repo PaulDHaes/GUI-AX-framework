@@ -194,35 +194,56 @@ Keep Ax in sync from the dashboard — a dedicated Settings tab shows the curren
 
 ---
 
-## Architecture
+## How it works
 
 ```
-┌────────────────────────────────────────────┐
-│         React / TypeScript  (Vite)         │
-│  Fleet · Scans · Map · Targets · AI panel  │
-└───────────────────┬────────────────────────┘
-                    │  REST  (localhost:5000)
-                    ▼
-┌────────────────────────────────────────────┐
-│         axiom-bridge.py  (Flask)           │
-│  • Ax CLI executor (axiom-scan / ls / exec)│
-│  • imports/ watcher  →  auto-parse results │
-│  • Result normaliser + persistent store    │
-│  • DELETE / target management endpoints    │
-└───────────────────┬────────────────────────┘
-                    │
-                    ▼
-┌────────────────────────────────────────────┐
-│           Ax framework  (~/.axiom)         │
-│      axiom-scan · axiom-ls · axiom-exec    │
-└───────────────────┬────────────────────────┘
-                    │
-                    ▼
-┌────────────────────────────────────────────┐
-│  Cloud fleet  (AWS tested · DO/Azure/GCP/  │
-│  Linode/Hetzner/IBM/Scaleway/Exoscale)     │
-└────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│         React / TypeScript  (Vite — port 3000)       │
+│  Fleet · Scans · Targets · Map · Graph · Risk scorer │
+└──────────────────────┬───────────────────────────────┘
+                       │  HTTP REST  (localhost:5000)
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│            axiom-bridge.py  (Python / Flask)         │
+│                                                      │
+│  ① REST API — fleet, scan, target, import endpoints  │
+│  ② Subprocess wrapper — shells out to Ax CLI via zsh │
+│  ③ Scan runner — each scan launched in its own tmux  │
+│     session (survives browser close)                 │
+│  ④ File watcher — polls imports/ and auto-parses     │
+│     tool output (nuclei, nmap, httpx, ffuf, …)       │
+│  ⑤ Flat JSON store — target DB merged across tools   │
+└──────────────────────┬───────────────────────────────┘
+                       │  subprocess / zsh
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│              Ax framework  (~/.axiom)                │
+│   axiom-scan · axiom-ls · axiom-exec · axiom-power   │
+└──────────────────────┬───────────────────────────────┘
+                       │  SSH / cloud API
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│  Cloud fleet  (AWS tested · DO / Azure / GCP /       │
+│  Linode / Hetzner / IBM / Scaleway / Exoscale)       │
+└──────────────────────────────────────────────────────┘
 ```
+
+### What the bridge actually does
+
+The Flask bridge (`tools/axiom-bridge.py`) is the only piece talking to Ax. The React frontend never calls Ax directly — it speaks REST to the bridge, and the bridge shells out to `axiom-scan`, `axiom-ls`, `axiom-exec`, and friends via a `subprocess` call into `zsh`.
+
+**Scan lifecycle:**
+
+1. UI sends `POST /api/axiom/scan` with module, targets, and fleet name
+2. Bridge builds an `axiom-scan` command and launches it inside a named **tmux session** (`ax-scan-<id>`)
+3. Bridge polls the tmux session for output and exposes it via `GET /api/axiom/scans/<id>/output`
+4. When the scan finishes, Ax drops result files into the configured output path
+5. Bridge detects the output and moves it into `imports/` for auto-parsing
+6. Parser normalises tool output (JSON / XML / plain text) and merges it into the flat target store
+
+**Why tmux?** Scans keep running even if you close the browser tab, lose connectivity, or restart the UI. You can always `tmux attach -t ax-scan-<id>` to watch a scan in real time from any terminal.
+
+**Risk scoring** is entirely local and deterministic — no external API calls. The scorer weights vulnerabilities by severity (critical → 5 pts, high → 4, medium → 2, low → 1), adds a small factor for open port count and subdomain spread, and clamps the result to a 0–10 scale. No Gemini key or any other AI service is needed or used for this feature.
 
 ---
 
@@ -506,6 +527,57 @@ Updates both the dashboard repo **and** Ax in one shot.
 ```bash
 git -C ~/.axiom pull --ff-only origin main
 ```
+
+---
+
+## 🗺️ Roadmap / TODO
+
+Things that don't exist yet but are planned or being explored. PRs and ideas welcome.
+
+### 🔗 Scan chaining & automated pipelines
+
+Right now every scan is launched manually and you have to copy output into the next tool yourself. The goal is a **pipeline builder** where you define a sequence of modules and the output of each step automatically feeds the next — e.g.:
+
+```
+subfinder  →  httpx (live host filter)  →  nuclei  →  gowitness
+```
+
+Each step would pick up the structured output from the previous scan instead of requiring a separate file drop into `imports/`.
+
+### MCP server (Model Context Protocol)
+
+Expose the bridge's core functions as an **MCP tool server** so any MCP-compatible AI agent (Claude Desktop, Copilot agents, custom LLM wrappers) can:
+
+- Query the target database (`get_targets`, `get_target_detail`)
+- Launch scans (`run_scan`, `check_scan_status`)
+- Manage the fleet (`list_fleet`, `init_fleet`, `delete_instance`)
+- Import and summarise results
+
+This would turn the dashboard into something agents can drive autonomously — e.g. "run a full recon on example.com and report back with findings".
+
+### Scheduled & recurring scans
+
+Cron-style scheduling so you can run a subdomain enumeration every Monday or a nuclei sweep every 24 hours against a saved target list — with delta alerting to highlight new findings since the last run.
+
+### Notifications & webhooks
+
+- **Slack / Discord / Teams** messages when a scan completes or a critical vuln is found
+- Generic **outbound webhook** support (POST a JSON payload to any URL)
+- Optional **email digest** with new findings summary
+
+### Scan templates / playbooks
+
+Save named scan configurations (module + options + target list + fleet size) and replay them with one click. Ship a set of built-in playbooks: _quick-http-probe_, _full-subdomain-enum_, _vuln-sweep_, _recon-ftw_.
+
+### Multi-user & auth layer
+
+Currently the dashboard is single-user with no authentication — whoever can reach port 3000 has full control. Future work includes a lightweight auth layer (API key or OAuth) and per-user scan history for team deployments.
+
+### Extra basic features that didn't make the initial cut but are on the backlog
+
+- **VPS cost estimator** — rough monthly cost based on instance types and uptime
+- **Better active scan output parsing** — more structured data extraction for modules like `ffuf` and `gowitness` that currently show raw logs, better live view
+- **Scan tagging & categorisation** — better labeling and categorisation of scans for easier filtering and historical analysis
 
 ---
 
