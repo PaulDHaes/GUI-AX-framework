@@ -138,7 +138,7 @@ const FleetManager = () => {
               onChange={(e) => setFilterMode(e.target.value)}
               className="appearance-none bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 px-3 py-2 pr-8 rounded-lg text-sm transition-colors cursor-pointer"
             >
-              <option value="managed">Axiom Managed</option>
+              <option value="managed">AX Managed</option>
               <option value="all">All Instances</option>
             </select>
             <Filter className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />

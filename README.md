@@ -122,6 +122,22 @@ Launch distributed scans across your entire cloud fleet with a few clicks. Pick 
 
 > **Tested modules:** The following modules have been verified end-to-end with this dashboard: `nuclei`, `amass`, `subfinder`, `httpx`, `nmap`, `naabu`, `ffuf`, `gowitness`, `dnsx`, `whois`, and `masscan`. Other Ax modules should work but may not have structured output parsing — results will still appear as raw log lines.
 
+### 🧩 Workflow Builder
+
+Chain scans into automated pipelines instead of launching each module by hand. The Workflow Builder is a **DAG (directed-acyclic-graph) pipeline editor** — you add modules as steps and link them together, and the output of each step is fed automatically into the next. No more copying files between tools or dropping output into `imports/` by hand.
+
+- **Sequential, parallel & fan-in steps** — link a step to one parent to run it after that step completes, leave it unlinked to run it as a parallel root, or give it multiple parents to join several branches (fan-in). Classic recon chain:
+
+  ```
+  subfinder  →  httpx (live host filter)  →  nuclei
+                                         ↘  gowitness
+  ```
+
+- **AMI-aware module picker** — like the Scan Launcher, the builder only offers modules that are actually baked into your fleet's provisioner image (barebones / default / reconftw / extras). Unavailable modules are greyed out with a badge showing which image would provide them, so you can't build a pipeline your fleet can't run.
+- **Saveable custom templates** — build a pipeline once, click **Save as template**, and it's stored (in your browser's `localStorage`) alongside the built-in playbooks. Custom templates round-trip the full branch structure, so reloading one restores every sequential/parallel/fan-in link exactly. Delete them from the template gallery when you're done.
+- **Built-in playbooks** — a set of ready-made linear pipelines you can load and tweak as a starting point.
+- **Backend step sequencer** — pipelines are executed by `tools/workflow-runner.py`, which topologically sorts the steps, groups them into execution "waves", launches each module via the bridge, waits for real completion, and passes structured output downstream. The UI polls run status live and shows per-step progress, logs, and an abort button.
+
 ### 🖥️ Fleet Manager
 
 View and control every instance in your Ax fleet — provider, region, IP, status, specs, and cost. Power instances on/off, SSH in, run commands across the whole fleet, or delete instances directly from the UI. Supports DigitalOcean, AWS, Azure, Linode, and more.
@@ -176,7 +192,18 @@ Supported formats imported automatically:
 
 ### 🗺️ Geographic Map
 
-D3 world map showing where whois-registered entities are located. Dots are colour-coded green → yellow → red by entity count per country. Zoom-invariant — dots stay readable at any zoom level.
+D3 world map showing where your assets are located. Dots are colour-coded green → yellow → red by asset count, and stay readable at any zoom level. It draws from **two independent geo sources**:
+
+- **WHOIS** — the registrant country from whois scans, plotted at the country centroid (white ring).
+- **IP geolocation** — forward-resolves every host and geolocates its IP to a **city-level** dot (cyan ring). Two providers:
+  - **Locate by IP** (offline) — looks IPs up in a local **MaxMind GeoLite2** database. Fully private: no target IP ever leaves your machine. Hosts imported with an IP already present (from httpx/dnsx) are geolocated automatically on import.
+  - **Online ↗** (no signup) — uses the free [ip-api.com](https://ip-api.com) service, so it works with **zero setup**. The trade-off: your target IPs are sent to a third party, and the free tier is HTTP with a ~15 req/min limit. Only ever runs when you click the button.
+
+  Both cache results per IP, and the button DNS-resolves any hosts that don't yet have an IP.
+
+> **Choosing a provider:** the offline route is the private default and appears whenever a database is present. To enable it, create a free [MaxMind account](https://www.maxmind.com/en/geolite2/signup), download **GeoLite2-City.mmdb**, drop it at `data/GeoLite2-City.mmdb` (or set `GEOIP_DB_PATH`), and install `geoip2` (bundled in the Docker image and installer). Don't want the signup? Just use **Online ↗** — no key or database needed.
+
+> **Disabling online lookups:** if you'd rather never send IPs off-box, turn off **Settings → Map & Privacy → Allow online IP lookups**. The Online button disappears and only the offline provider is offered. (The offline auto-enrich on import never uses the network regardless.)
 
 ### 🔗 Topology Graph
 
@@ -192,6 +219,57 @@ Keep Ax in sync from the dashboard — a dedicated Settings tab shows the curren
 
 ## ![Dashboard Screenshot](./images/system-update.jpg)
 
+### 🔌 MCP Server (drive the dashboard from AI tools)
+
+An optional **Model Context Protocol** server ([tools/mcp-server.py](tools/mcp-server.py)) exposes the platform's core functions as MCP tools, so any MCP client — Claude Desktop, an agent, or a reporting workflow such as **Ghostwriter** — can operate the dashboard as a specific logged-in account. It's a thin adapter over the bridge REST API, so all logic and auth stay in one place.
+
+**Tools exposed** (19): `start_scan`, `start_full_scan`, `build_workflow`, `list_scans`, `get_scan`, `get_scan_output`, `get_workflow_status`, `list_vulnerabilities`, `list_targets`, `get_target`, `list_users`, `add_user`, `list_teams`, `create_team`, `add_user_to_team`, `create_invite`, `list_fleet`, `terminate_fleet`, `whoami`.
+
+- **Auto-terminate is enforced** — every scan or workflow launched through MCP spins up a fresh fleet and tears it down when done. An MCP caller can never leave cloud instances running.
+- **Acts as one account** — point it at a bridge and give it a token or username/password; all actions are attributed to that user. Run one instance per account for per-user isolation.
+- **Reporting-ready** — `list_vulnerabilities` returns flattened, severity-sorted findings (`target · severity · name · matched · type · description`) ideal for pulling into a Ghostwriter report, and `list_scans` / `get_target` expose the underlying scan data.
+
+**Turn it on from the dashboard** — go to **Settings → MCP Server** and flip the toggle. The bridge launches the server as a background process (streamable-HTTP on port `8787` by default), points it back at itself, and runs it **as your logged-in account**. The panel shows the live status, the client endpoint to hand to your MCP tool, and a tail of the server log; flip it off to stop the process. (Admin only when auth is enabled; port `8787` is already published in `docker-compose.yml`.)
+
+**Or run it manually** (stdio for Claude Desktop, HTTP for remote/agents):
+
+```bash
+# stdio (local)
+GUIAX_USERNAME=alice GUIAX_PASSWORD=… python3 tools/mcp-server.py
+
+# streamable HTTP (remote tools / Ghostwriter integration)
+python3 tools/mcp-server.py --transport streamable-http --host 0.0.0.0 --port 8787
+```
+
+Configure with env vars: `GUIAX_BRIDGE_URL` (default `http://localhost:5000`), `GUIAX_TOKEN` **or** `GUIAX_USERNAME`/`GUIAX_PASSWORD`, `GUIAX_DEFAULT_REGION`, `GUIAX_MAX_INSTANCES` (fleet cap, default 5).
+
+Example Claude Desktop entry (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "gui-ax": {
+      "command": "python3",
+      "args": ["/absolute/path/to/gui-ax-framework/tools/mcp-server.py"],
+      "env": { "GUIAX_BRIDGE_URL": "http://localhost:5000",
+               "GUIAX_USERNAME": "alice", "GUIAX_PASSWORD": "your-password" }
+    }
+  }
+}
+```
+
+> **Ghostwriter workflow:** run the server with `--transport streamable-http` next to the bridge; an operator (or an agent working alongside Ghostwriter) authenticates as their dashboard account and can then pull `list_vulnerabilities` / scan data into a report **and** kick off `start_full_scan` / `build_workflow` against the right targets without leaving their reporting flow. Ghostwriter has no native MCP client today, so this is consumed via an MCP-capable agent or a small connector — see the note below.
+
+### 👥 Multi-user, Teams & Invites
+
+The dashboard supports **multiple users** with a login screen and role-based access. Admins get an **Admin Panel** to create users, manage roles, and reset passwords; everyone gets a **User Profile** page to change their own password.
+
+- **Login & sessions** — users authenticate against the bridge (`/api/auth/login`); the Admin nav and panel are gated to the `admin` role.
+- **Teams** — group users into project teams. The dashboard can scope the target view to _all_, _personal_, or a specific team, so team members only see the scans and workflows that belong to their project (direct scans are prefixed `teamSlug/…` and workflow scans `wf-teamSlug-…`).
+- **Invites** — admins issue invite codes that new users redeem to join a team.
+
+> **Single-user fallback:** if no users are configured, the dashboard runs open with full admin access — the same behaviour as before auth existed — so existing single-user setups keep working unchanged.
+
 ---
 
 ## How it works
@@ -199,7 +277,7 @@ Keep Ax in sync from the dashboard — a dedicated Settings tab shows the curren
 ```
 ┌──────────────────────────────────────────────────────┐
 │         React / TypeScript  (Vite — port 3000)       │
-│  Fleet · Scans · Targets · Map · Graph · Risk scorer │
+│  Fleet · Scans · Workflows · Targets · Map · Risk    │
 └──────────────────────┬───────────────────────────────┘
                        │  HTTP REST  (localhost:5000)
                        ▼
@@ -213,6 +291,8 @@ Keep Ax in sync from the dashboard — a dedicated Settings tab shows the curren
 │  ④ File watcher — polls imports/ and auto-parses     │
 │     tool output (nuclei, nmap, httpx, ffuf, …)       │
 │  ⑤ Flat JSON store — target DB merged across tools   │
+│  ⑥ Workflow sequencer — runs DAG pipelines in waves  │
+│     (workflow-runner.py), feeding step → step        │
 └──────────────────────┬───────────────────────────────┘
                        │  subprocess / zsh
                        ▼
@@ -415,6 +495,7 @@ PORT=5000
 | `PORT`           | `5000`                           | Flask bridge port                              |
 | `STORE_PATH`     | `./data/axiom_bridge_store.json` | Persistent target store                        |
 | `IMPORTS_PATH`   | `./imports`                      | Directory watched for scan results             |
+| `GEOIP_DB_PATH`  | `./data/GeoLite2-City.mmdb`      | MaxMind GeoLite2 DB for offline IP geolocation on the Geo Map (optional) |
 
 ---
 
@@ -448,16 +529,23 @@ gui-ax-framework/
 │   ├── FleetManager.tsx     # Instance list, power, SSH, delete
 │   ├── FleetControl.tsx     # Fleet-wide exec & control
 │   ├── ScanLauncher.tsx     # Scan builder (module, targets, fleet)
+│   ├── WorkflowBuilder.tsx  # DAG pipeline editor + saveable templates
 │   ├── ActiveScans.tsx      # Live scan monitor (with failure detection)
 │   ├── ScanOutput.tsx       # Per-scan output: tables, screenshot gallery, filters
 │   ├── GeoMap.tsx           # D3 world map (whois geo dots)
 │   ├── TopologyGraph.tsx    # D3 attack-surface graph
+│   ├── LoginPage.tsx        # Auth / login screen
+│   ├── AdminPanel.tsx       # User & team management (admin only)
+│   ├── UserProfile.tsx      # Per-user profile / password change
 │   ├── Settings.tsx         # App settings + Ax updater
 │   └── ui/                  # shadcn/ui primitives
 ├── services/
-│   └── axiomProvider.ts     # Bridge API client / state provider
+│   ├── axiomProvider.ts     # Bridge API client / state provider
+│   └── provisioner.ts       # AMI/provisioner module-availability map
 ├── tools/
 │   ├── axiom-bridge.py      # Flask API + file watcher (main backend)
+│   ├── workflow-runner.py   # Backend workflow step sequencer (DAG waves)
+│   ├── mcp-server.py        # Model Context Protocol server (AI-tool access)
 │   ├── gui-ax-install.sh    # One-liner installer
 │   ├── ax-update.sh         # Pull latest Ax framework (~/.axiom)
 │   ├── start-dev.sh         # Start bridge + UI together
@@ -495,6 +583,22 @@ Key endpoints exposed by `axiom-bridge.py`:
 | `GET`    | `/api/axiom/targets`                   | List all targets                    |
 | `DELETE` | `/api/axiom/targets/<id>`              | Delete a target                     |
 | `GET`    | `/api/axiom/update`                    | Stream Ax framework git pull output |
+| `GET`    | `/api/geo/status`                      | Offline IP-geolocation availability |
+| `POST`   | `/api/geo/enrich`                      | Resolve + geolocate host IPs (Geo Map) |
+| `POST`   | `/api/workflow/run`                    | Launch a workflow pipeline          |
+| `GET`    | `/api/workflow/<id>/status`            | Workflow run status + per-step state |
+| `GET`    | `/api/workflow/<id>/log`               | Workflow run log                    |
+| `POST`   | `/api/workflow/<id>/abort`             | Abort a running workflow            |
+| `GET`    | `/api/mcp/status`                      | MCP server process status           |
+| `POST`   | `/api/mcp/start` · `/api/mcp/stop`     | Start / stop the MCP server (admin) |
+| `GET`    | `/api/auth/status`                     | Current auth / session status       |
+| `POST`   | `/api/auth/login`                      | Log in                              |
+| `POST`   | `/api/auth/logout`                     | Log out                             |
+| `GET`    | `/api/users` · `/api/users/me`         | List users / current user           |
+| `POST`   | `/api/users`                           | Create a user (admin)               |
+| `GET`    | `/api/teams`                           | List teams                          |
+| `POST`   | `/api/teams`                           | Create a team (admin)               |
+| `POST`   | `/api/invites` · `/api/invites/accept` | Issue / redeem a team invite        |
 
 ---
 
@@ -534,26 +638,7 @@ git -C ~/.axiom pull --ff-only origin main
 
 Things that don't exist yet but are planned or being explored. PRs and ideas welcome.
 
-### 🔗 Scan chaining & automated pipelines
-
-Right now every scan is launched manually and you have to copy output into the next tool yourself. The goal is a **pipeline builder** where you define a sequence of modules and the output of each step automatically feeds the next — e.g.:
-
-```
-subfinder  →  httpx (live host filter)  →  nuclei  →  gowitness
-```
-
-Each step would pick up the structured output from the previous scan instead of requiring a separate file drop into `imports/`.
-
-### MCP server (Model Context Protocol)
-
-Expose the bridge's core functions as an **MCP tool server** so any MCP-compatible AI agent (Claude Desktop, Copilot agents, custom LLM wrappers) can:
-
-- Query the target database (`get_targets`, `get_target_detail`)
-- Launch scans (`run_scan`, `check_scan_status`)
-- Manage the fleet (`list_fleet`, `init_fleet`, `delete_instance`)
-- Import and summarise results
-
-This would turn the dashboard into something agents can drive autonomously — e.g. "run a full recon on example.com and report back with findings".
+> **✅ Recently shipped** (previously on this list): **scan chaining & automated pipelines** (see [Workflow Builder](#-workflow-builder)), **scan templates / playbooks** (saveable custom workflow templates), a **multi-user & auth layer** with teams and invites (see [Multi-user, Teams & Invites](#-multi-user-teams--invites)), and an **MCP server** for AI-tool access (see [MCP Server](#-mcp-server-drive-the-dashboard-from-ai-tools)).
 
 ### Scheduled & recurring scans
 
@@ -564,14 +649,6 @@ Cron-style scheduling so you can run a subdomain enumeration every Monday or a n
 - **Slack / Discord / Teams** messages when a scan completes or a critical vuln is found
 - Generic **outbound webhook** support (POST a JSON payload to any URL)
 - Optional **email digest** with new findings summary
-
-### Scan templates / playbooks
-
-Save named scan configurations (module + options + target list + fleet size) and replay them with one click. Ship a set of built-in playbooks: _quick-http-probe_, _full-subdomain-enum_, _vuln-sweep_, _recon-ftw_.
-
-### Multi-user & auth layer
-
-Currently the dashboard is single-user with no authentication — whoever can reach port 3000 has full control. Future work includes a lightweight auth layer (API key or OAuth) and per-user scan history for team deployments.
 
 ### Extra basic features that didn't make the initial cut but are on the backlog
 

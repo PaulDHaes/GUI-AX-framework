@@ -20,11 +20,24 @@ Environment variables:
 """
 
 import sys as _sys
+import importlib as _importlib
 from pathlib import Path as _Path
 # Ensure tools/ is on sys.path so "import importers" resolves correctly.
 _tools_dir = str(_Path(__file__).resolve().parent)
 if _tools_dir not in _sys.path:
     _sys.path.insert(0, _tools_dir)
+
+def _fresh_import(module_name: str, attr: str):
+    """Import attr from module_name, forcing a reload if the cached module
+    doesn't have it (handles stale sys.modules from a previous process start)."""
+    import importlib, sys
+    mod = sys.modules.get(module_name)
+    if mod is not None and not hasattr(mod, attr):
+        # Cached module is stale — reload from disk
+        mod = importlib.reload(mod)
+    elif mod is None:
+        mod = importlib.import_module(module_name)
+    return getattr(mod, attr)
 
 from flask import Flask, jsonify, request, abort, send_file, Response
 from flask_cors import CORS
@@ -32,9 +45,11 @@ import os
 import re
 import json
 import subprocess
+import signal
 import traceback
+import secrets
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import threading
 import shutil
@@ -114,7 +129,18 @@ PORT = int(os.environ.get("PORT", "5000"))
 WATCHER_INTERVAL = int(os.environ.get("WATCHER_INTERVAL", "300"))
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True)
+
+# ── Auth configuration ─────────────────────────────────────────────────────────
+# Set GUI_AX_PASSWORD to enable login gate.  Leave empty to disable auth.
+# Set GUI_AX_USERNAME to change the username (default: admin).
+# Set GUI_AX_SECRET_KEY for a stable session key across restarts.
+AUTH_USERNAME = os.environ.get("GUI_AX_USERNAME", "admin")
+AUTH_PASSWORD = os.environ.get("GUI_AX_PASSWORD", "")       # empty = auth OFF
+app.secret_key = os.environ.get("GUI_AX_SECRET_KEY") or secrets.token_hex(32)
+
+from datetime import timedelta
+app.permanent_session_lifetime = timedelta(days=7)
 
 # store format: { "targets": [ {id, domain, sources, created_at} ], "fleet": [...] }
 DEFAULT_STORE = {"targets": [], "fleet": []}
@@ -126,6 +152,13 @@ FLEET_CACHE = {
     "ttl": 30  # Cache for 30 seconds (configurable via FLEET_CACHE_TTL env var)
 }
 FLEET_CACHE["ttl"] = int(os.environ.get("FLEET_CACHE_TTL", "30"))
+
+# Guard so only one axiom-ls can be in flight at a time. Without this, the UI
+# polling /api/fleet (every 30s, with refresh=true) would spawn a fresh
+# axiom-ls -> aws call on every poll even while the previous one is still
+# running/hung — stacking up processes and starving the container's CPU.
+# Concurrent callers instead get served the last cached data immediately.
+FLEET_FETCH_LOCK = threading.Lock()
 
 # Track fleet prefixes/names used by active scans
 # This helps the fleet endpoint show instances created by scans even if they're not in selected.conf yet
@@ -304,7 +337,7 @@ def scan_imports_dir(verbose: bool = True) -> int:
                         if verbose:
                             print(f"[watcher] Processing JPEG-only gowitness folder: {subdir.name} ({len(jpeg_files)} images)")
                         try:
-                            from importers.import_gowitness import parse_jpeg_folder
+                            parse_jpeg_folder = _fresh_import("importers.import_gowitness", "parse_jpeg_folder")
                             # Use the full folder name as unique scan ID (not just the prefix)
                             _jpeg_key = subdir.name.rstrip('.')
                             try:
@@ -385,7 +418,7 @@ def scan_imports_dir(verbose: bool = True) -> int:
                         if verbose:
                             print(f"[watcher] Processing JPEG-only gowitness folder in imports/: {gw_dir.name} ({len(jpeg_files)} images)")
                         try:
-                            from importers.import_gowitness import parse_jpeg_folder
+                            parse_jpeg_folder = _fresh_import("importers.import_gowitness", "parse_jpeg_folder")
                             _jpeg_key = gw_dir.name.rstrip('.')
                             try:
                                 with open(SCANS_STORE, "r") as _sf:
@@ -587,6 +620,16 @@ def process_import_file(filepath, scanner_type=None, skip_move=False):
                     _t["programName"] = "GoWitness Scan"
                     break
         if changed:
+            # Opportunistically geolocate freshly-imported subdomains that already
+            # carry an IP — offline + cached, so it's cheap. The slower pass that
+            # DNS-resolves hosts without an IP is on-demand via POST /api/geo/enrich.
+            try:
+                _enrich = _fresh_import("importers.base", "enrich_targets_geo")
+                _gstats = _enrich(targets, do_dns=False)
+                if _gstats.get("located"):
+                    print(f"[geo] auto-located {_gstats['located']} subdomain(s) by IP")
+            except Exception as _ge:
+                print(f"[geo] auto-enrich skipped: {_ge}")
             store["targets"] = targets
             save_store(store)
             print(f"[DEBUG] ✓ Saved! Total targets: {len(targets)}")
@@ -678,6 +721,123 @@ def save_store(store):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(store, f, indent=2)
     os.replace(tmp, STORE_PATH)
+
+
+# ── Auth gate (Bearer token — works across origins) ───────────────────────────
+# Tokens are kept in memory. They survive bridge restarts only if
+# GUI_AX_STATIC_TOKEN is set; otherwise each restart issues new tokens.
+_active_tokens: set = set()
+if os.environ.get("GUI_AX_STATIC_TOKEN"):
+    _active_tokens.add(os.environ["GUI_AX_STATIC_TOKEN"])
+
+
+def _token_from_request() -> str:
+    """Extract Bearer token from the Authorization header."""
+    hdr = request.headers.get("Authorization", "")
+    if hdr.startswith("Bearer "):
+        return hdr[7:].strip()
+    return ""
+
+
+@app.before_request
+def _require_auth():
+    """Block all /api/* requests unless the caller has a valid Bearer token.
+    Auth is disabled entirely when GUI_AX_PASSWORD is not set."""
+    if not AUTH_PASSWORD:
+        return  # auth disabled globally
+    if request.method == "OPTIONS":
+        return  # CORS preflight — never block
+    path = request.path
+    if path.startswith("/api/auth/"):
+        return  # login / logout / status are always public
+    if not path.startswith("/api/"):
+        return  # static files, /, /health
+    token = _token_from_request()
+    if token and token in _active_tokens:
+        return  # valid token
+    return jsonify({"error": "unauthorized", "authRequired": True}), 401
+
+
+@app.route("/api/auth/status", methods=["GET"])
+def auth_status():
+    """Return auth state for the current caller, including their role."""
+    if not AUTH_PASSWORD:
+        return jsonify({"authRequired": False, "authenticated": True, "username": None, "role": None})
+    token = _token_from_request()
+    is_auth = bool(token and token in _active_tokens)
+
+    if not is_auth:
+        return jsonify({"authRequired": True, "authenticated": False, "username": None, "role": None})
+
+    # Look up the user record by token to return their real username + role
+    store = load_store()
+    user = next(
+        (u for u in _get_users(store) if u.get("token") == token),
+        None,
+    )
+    if user:
+        return jsonify({
+            "authRequired":  True,
+            "authenticated": True,
+            "username":      user["username"],
+            "role":          user.get("role", "user"),
+        })
+
+    # Legacy single-user mode (store has no user records yet)
+    return jsonify({
+        "authRequired":  True,
+        "authenticated": True,
+        "username":      AUTH_USERNAME,
+        "role":          "admin",
+    })
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    """Validate credentials and return a Bearer token.
+    Checks the multi-user store first; falls back to env-var single-user."""
+    if not AUTH_PASSWORD:
+        return jsonify({"ok": True, "authRequired": False, "token": None})
+
+    data     = request.get_json(silent=True) or {}
+    username = data.get("username", "")
+    password = data.get("password", "")
+
+    # ── Multi-user store check ─────────────────────────────────────────────
+    store = load_store()
+    users = _get_users(store)
+    if users:
+        matched = next((u for u in users if u.get("username") == username), None)
+        if matched and _check_pw(password, matched.get("passwordHash", "")):
+            token = secrets.token_hex(32)
+            _active_tokens.add(token)
+            # Persist token + last-login on the user record
+            matched["token"]     = token
+            matched["lastLogin"] = datetime.now(timezone.utc).isoformat()
+            store["users"] = users
+            save_store(store)
+            return jsonify({"ok": True, "token": token})
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    # ── Legacy single-user env-var fallback ───────────────────────────────
+    username_ok = secrets.compare_digest(username, AUTH_USERNAME)
+    password_ok = secrets.compare_digest(password, AUTH_PASSWORD)
+
+    if username_ok and password_ok:
+        token = secrets.token_hex(32)
+        _active_tokens.add(token)
+        return jsonify({"ok": True, "token": token})
+
+    return jsonify({"error": "Invalid username or password"}), 401
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    """Revoke the caller's token."""
+    token = _token_from_request()
+    if token:
+        _active_tokens.discard(token)
+    return jsonify({"ok": True})
 
 
 @app.route("/health")
@@ -951,9 +1111,24 @@ def get_fleet():
         print(f"[bridge] Returning cached fleet data (age: {cache_age:.1f}s, ttl: {FLEET_CACHE['ttl']}s)")
         return jsonify(FLEET_CACHE["data"])
     
+    # Only let one axiom-ls run at a time. If another request is already
+    # fetching, don't pile on a second axiom-ls (which under this container's
+    # emulated AWS CLI can busy-loop) — serve the current cache instead.
+    if not FLEET_FETCH_LOCK.acquire(blocking=False):
+        print(f"[bridge] axiom-ls already in flight — serving cached fleet ({len(FLEET_CACHE['data'])} instances) instead of stacking another call")
+        return jsonify(FLEET_CACHE["data"])
+
     # Cache miss or expired - fetch fresh data from axiom-ls via zsh
+    # Short timeout: this endpoint is polled by the UI, so we'd rather fail
+    # fast and fall back to the last known-good data than block a page load
+    # for minutes on a hung/slow AWS region call. Lock is held only around the
+    # subprocess call (the part that spawns axiom-ls); the parsing below is
+    # cheap and process-free, so we release right after.
     print(f"[bridge] Cache {'bypass' if force_refresh else 'miss/expired'} - fetching fleet data via axiom-ls")
-    result = run_zsh_command("axiom-ls --json", timeout=180)
+    try:
+        result = run_zsh_command("axiom-ls --json", timeout=25)
+    finally:
+        FLEET_FETCH_LOCK.release()
     
     # Load axiom instance metadata from stats.log
     instance_metadata = {}
@@ -1134,9 +1309,17 @@ def get_fleet():
         print(f"[bridge] axiom-ls failed or returned no data")
         if result["stderr"]:
             print(f"[bridge] axiom-ls stderr: {result['stderr'][:200]}")
-    
-    # Return empty list if axiom-ls fails (don't fall back to stale stored data)
-    print(f"[bridge] No instances available from axiom-ls, returning empty fleet")
+
+    # axiom-ls failed/timed out this round (e.g. a slow/unreachable AWS
+    # region). Serve the last known-good fleet instead of blanking the list —
+    # returning [] here made instances that are actually up (including ones
+    # a workflow just provisioned) disappear from the UI for as long as the
+    # underlying AWS call keeps failing.
+    if FLEET_CACHE["data"]:
+        print(f"[bridge] axiom-ls unavailable, serving stale cached fleet (age: {time.time() - FLEET_CACHE['timestamp']:.1f}s)")
+        return jsonify(FLEET_CACHE["data"])
+
+    print(f"[bridge] No instances available from axiom-ls and no cache to fall back to, returning empty fleet")
     return jsonify([])
 
 
@@ -1173,6 +1356,56 @@ def delete_targets_bulk():
     store["targets"] = [t for t in store.get("targets", []) if t.get("id") not in ids]
     save_store(store)
     return jsonify({"deleted": list(ids), "remaining": len(store["targets"])})
+
+
+@app.route("/api/geo/status", methods=["GET"])
+def geo_status():
+    """Report which IP-geolocation providers the map can use.
+      offlineAvailable — MaxMind GeoLite2 present (private, local).
+      onlineAvailable  — ip-api.com fallback (no key/signup; needs internet)."""
+    try:
+        geo_available = _fresh_import("importers.base", "geo_available")
+        geoip_db_path = _fresh_import("importers.base", "geoip_db_path")
+        offline = bool(geo_available())
+        return jsonify({
+            "available": offline,            # kept for backwards-compat
+            "offlineAvailable": offline,
+            "onlineAvailable": True,         # no key needed; assumed reachable
+            "dbPath": geoip_db_path(),
+        })
+    except Exception as e:
+        return jsonify({"available": False, "offlineAvailable": False,
+                        "onlineAvailable": True, "dbPath": None, "error": str(e)})
+
+
+@app.route("/api/geo/enrich", methods=["POST"])
+def geo_enrich():
+    """Populate subdomain geo via IP geolocation (second map source alongside
+    WHOIS). Body:
+      {"doDns": bool}      — resolve hosts lacking an IP first (default true)
+      {"provider": str}    — "offline" (GeoLite2, default) or "online" (ip-api.com)"""
+    body     = request.get_json(silent=True) or {}
+    do_dns   = bool(body.get("doDns", True))
+    provider = body.get("provider", "offline")
+    if provider not in ("offline", "online"):
+        provider = "offline"
+    try:
+        enrich = _fresh_import("importers.base", "enrich_targets_geo")
+    except Exception as e:
+        return jsonify({"error": f"geo module unavailable: {e}"}), 500
+    store   = load_store()
+    targets = store.get("targets", [])
+    stats   = enrich(targets, do_dns=do_dns, provider=provider)
+    if not stats.get("available"):
+        return jsonify({
+            "error": "Offline GeoLite2 database/geoip2 library not available — "
+                     "add GeoLite2-City.mmdb, or use the online provider (see README)",
+            **stats,
+        }), 400
+    if stats.get("located") or stats.get("resolved"):
+        store["targets"] = targets
+        save_store(store)
+    return jsonify(stats)
 
 
 @app.route("/run-axiom-ls", methods=["GET"])
@@ -1332,21 +1565,105 @@ def load_scans_from_stats_log():
 
     return scans
 
-def load_scans():
-    """Load scans from stats.log, fall back to store if needed"""
+def _resolve_inflight_status(scan):
+    """For a scan still marked running/initializing/launched in SCANS_STORE,
+    inspect its wrapper log to see if it actually finished or died.
+
+    The wrapper shell (see launch_scan) always emits '=== Scan Completed ==='
+    once axiom-scan returns, then either '✓ Output saved'/'✓ Output directory'
+    or '✗ Output not found'. Until stats.log gets an entry, that log is the only
+    signal — so a scan that aborts in seconds (missing tool, bad input) would
+    otherwise sit at 'running' forever both in the UI and for workflow-runner.
+
+    Returns a (possibly mutated) copy of the scan dict with an updated status,
+    and — when failed — 'failure_reason' / 'failure_lines' for display.
+    """
+    status = (scan.get("status") or "").lower()
+    if status not in ("running", "initializing", "launched", "pending", ""):
+        return scan
+
+    log_path = scan.get("logFile")
+    if not log_path:
+        sid = scan.get("id") or ""
+        if sid:
+            log_path = os.path.join(
+                os.path.expanduser("~/.axiom/tmp"),
+                f"{sid.replace('+', '_')}.log"
+            )
+    if not log_path or not os.path.isfile(log_path):
+        return scan  # not started writing yet → genuinely still spinning up
+
     try:
-        scans = load_scans_from_stats_log()
-        if scans:
-            return scans
+        with open(log_path, "r", errors="replace") as f:
+            lines = f.readlines()
+    except Exception:
+        return scan
+
+    text = "".join(lines)
+    if "=== Scan Completed ===" not in text:
+        return scan  # axiom-scan still running → leave as-is
+
+    # The wrapper has finished. Decide completed vs failed.
+    updated = dict(scan)
+    is_failed, reason, fail_lines = _detect_log_failures(lines)
+    output_missing = "✗ Output not found" in text
+    output_ok = ("✓ Output saved" in text) or ("✓ Output directory" in text)
+
+    if is_failed or (output_missing and not output_ok):
+        updated["status"] = "failed"
+        updated["failure_reason"] = reason or "scan finished but produced no output"
+        if fail_lines:
+            updated["failure_lines"] = fail_lines
+    elif output_ok:
+        updated["status"] = "completed"
+    # else: completed marker present but ambiguous → leave running for now
+    return updated
+
+
+def load_scans():
+    """Load scans from stats.log AND merge any running scans from SCANS_STORE.
+
+    stats.log only contains scans after axiom-scan finishes writing to it, so
+    just-launched / in-flight scans need to come from SCANS_STORE. We dedupe by
+    id/name (stats.log entry wins for completed scans).
+    """
+    stats_scans = []
+    try:
+        stats_scans = load_scans_from_stats_log()
     except Exception as e:
         print(f"[scans] Error loading from stats.log: {e}")
-    
-    # Fallback to stored scans
+
+    store_scans = []
     try:
         with open(SCANS_STORE, "r") as f:
-            return json.load(f)
-    except:
+            store_scans = json.load(f) or []
+    except Exception:
+        store_scans = []
+
+    if not stats_scans and not store_scans:
         return []
+
+    # Dedupe — prefer stats.log entry (it has runtime/results/etc.)
+    seen = set()
+    merged = []
+    for s in stats_scans:
+        sid = s.get("id") or s.get("name")
+        if sid:
+            seen.add(sid)
+        merged.append(s)
+
+    for s in store_scans:
+        sid = s.get("id") or s.get("name")
+        if sid and sid not in seen:
+            # Ensure running scans expose a status field the UI can poll on
+            if not s.get("status"):
+                s["status"] = "running"
+            # Reconcile against the wrapper log so a scan that already finished
+            # or died (before landing in stats.log) doesn't linger as 'running'.
+            s = _resolve_inflight_status(s)
+            merged.append(s)
+
+    return merged
 
 def save_scans(scans):
     """Save scans to store (mainly for running/pending scans not yet in stats.log)"""
@@ -1483,12 +1800,15 @@ def launch_scan():
     
     # Create scan record
     module_name = module.replace('.json', '')
-    scan_id = f"{module_name}+{datetime.utcnow().strftime('%m-%d_%H-%M-%S-%f')[:22]}"
+    scan_id = f"{module_name}+{datetime.now(timezone.utc).strftime('%m-%d_%H-%M-%S-%f')[:22]}"
 
     # Define targets_file path BEFORE building the scan record
     axiom_tmp = AXIOM_TMP  # Use configured temp path (Docker-friendly)
     os.makedirs(axiom_tmp, exist_ok=True)
     targets_file = os.path.join(axiom_tmp, f"{scan_name}_{module}_targets.txt")
+    # scan_name may contain a team-prefix slash (e.g. "team/name") which
+    # produces a subdirectory — make sure it exists before writing the file.
+    os.makedirs(os.path.dirname(targets_file), exist_ok=True)
 
     try:
         with open(SCANS_STORE, "r") as f:
@@ -1507,9 +1827,16 @@ def launch_scan():
         "fleet": deployed_fleet_name,
         "autoDestroyFleet": fleet_config.get("autoDestroy") if fleet_config else False,
         "status": "running",
-        "startedAt": datetime.utcnow().isoformat() + "Z",
+        "startedAt": datetime.now(timezone.utc).isoformat() + "Z",
         "completedAt": None,
         "progress": 0,
+        # Path to the per-scan wrapper log (written by the tmux shell below).
+        # load_scans() watches this to detect a scan that finished/failed before
+        # ever reaching stats.log (e.g. a missing tool aborts axiom-scan in <10s).
+        "logFile": os.path.join(
+            os.path.expanduser("~/.axiom/tmp"),
+            f"{scan_id.replace('+', '_')}.log"
+        ),
         "logs": []
     }
     
@@ -1849,7 +2176,8 @@ def preview_scan_command():
     final_output_file = output_file or f"{scan_name}-{module}.txt"
     axiom_tmp = AXIOM_TMP  # Use configured temp path (Docker-friendly)
     targets_file = os.path.join(axiom_tmp, f"{scan_name}_{module}_targets.txt")
-    
+    os.makedirs(os.path.dirname(targets_file), exist_ok=True)
+
     cmd = ["axiom-scan", targets_file, "-m", module, "-o", final_output_file]
     
     # Add fleet control options
@@ -2167,7 +2495,7 @@ def cancel_scan(scan_id):
         if scan.get("id") == scan_id:
             if scan.get("status") in ["running", "pending"]:
                 scan["status"] = "cancelled"
-                scan["completedAt"] = datetime.utcnow().isoformat() + "Z"
+                scan["completedAt"] = datetime.now(timezone.utc).isoformat() + "Z"
                 save_scans(scans)
                 return jsonify({"status": "cancelled"})
             else:
@@ -2180,6 +2508,43 @@ def cancel_scan(scan_id):
             return jsonify({"error": "Scan is already completed"}), 400
     
     return jsonify({"error": "Scan not found"}), 404
+
+@app.route("/api/axiom/scans/<scan_id>/complete", methods=["POST"])
+def complete_scan(scan_id):
+    """Mark a scan as completed (called by workflow-runner after filesystem detection)."""
+    data = request.get_json(silent=True) or {}
+    result_count = int(data.get("resultCount", 0))
+    output_path  = data.get("outputPath", "")
+    try:
+        with open(SCANS_STORE, "r") as f:
+            scans = json.load(f)
+    except Exception:
+        scans = []
+
+    for scan in scans:
+        if scan.get("id") == scan_id:
+            scan["status"]      = "completed"
+            scan["completedAt"] = datetime.now(timezone.utc).isoformat() + "Z"
+            scan["resultCount"] = result_count
+            scan["results"]     = result_count
+            if output_path:
+                scan["output"] = output_path
+            save_scans(scans)
+            return jsonify({"ok": True, "resultCount": result_count})
+
+    # Not in store (e.g. gowitness which had no SCANS_STORE entry) — add it.
+    scans.append({
+        "id":          scan_id,
+        "name":        scan_id,
+        "status":      "completed",
+        "completedAt": datetime.now(timezone.utc).isoformat() + "Z",
+        "resultCount": result_count,
+        "results":     result_count,
+        "output":      output_path,
+    })
+    save_scans(scans)
+    return jsonify({"ok": True, "resultCount": result_count, "created": True})
+
 
 @app.route("/api/axiom/scans/<scan_id>/targets", methods=["GET"])
 def get_scan_targets(scan_id):
@@ -2275,11 +2640,36 @@ _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 _SCREENSHOT_MODULES = {"gowitness", "webscreenshot", "scrying", "aquatone"}
 
 def _find_scan_folder(scan_id: str):
-    """Return (folder_path, source) for a scan_id, checking tmp then logs."""
+    """Return (folder_path, source) for a scan_id, checking tmp then logs.
+
+    Tries exact match first, then falls back to a prefix match on the module
+    name (the part before '+') so that the bridge-assigned scan_id (timestamped
+    at request time) still finds the axiom log directory (timestamped when
+    axiom-scan actually ran, which may be several seconds later).
+    """
     for base in [os.path.expanduser("~/.axiom/tmp"), os.path.expanduser("~/.axiom/logs")]:
+        # Exact match
         path = os.path.join(base, scan_id)
         if os.path.isdir(path):
             return path, ("tmp" if "tmp" in base else "logs")
+
+    # Fuzzy fallback: match directories whose name starts with the module
+    # prefix (e.g. "httprobe") extracted from scan_id "httprobe+06-18_..."
+    module_prefix = scan_id.split("+")[0] if "+" in scan_id else scan_id
+    for base in [os.path.expanduser("~/.axiom/tmp"), os.path.expanduser("~/.axiom/logs")]:
+        if not os.path.isdir(base):
+            continue
+        try:
+            candidates = sorted(
+                [d for d in os.listdir(base)
+                 if d.startswith(module_prefix + "+") and os.path.isdir(os.path.join(base, d))],
+                key=lambda d: os.path.getmtime(os.path.join(base, d)),
+                reverse=True,  # most recent first
+            )
+            if candidates:
+                return os.path.join(base, candidates[0]), ("tmp" if "tmp" in base else "logs")
+        except OSError:
+            pass
     return None, None
 
 @app.route("/api/axiom/scans/<scan_id>/screenshots", methods=["GET"])
@@ -2357,8 +2747,23 @@ def discover_scans_from_filesystem():
 
     # Build a name lookup from stored scan records so filesystem scan IDs
     # are mapped to the human-readable name given at launch time.
+    # We build two indexes:
+    #   _name_map        — exact id match
+    #   _prefix_name_map — module+MM-DD_HH-MM-SS prefix match (strips the last
+    #                      counter/microsecond suffix so bridge IDs like
+    #                      httprobe+07-02_21-10-09-653016 map to axiom folder
+    #                      names like httprobe+07-02_21-10-09-5)
     _stored   = load_scans()
     _name_map = {s["id"]: s["name"] for s in _stored if s.get("id") and s.get("name")}
+    _prefix_name_map: dict = {}
+    for _s in _stored:
+        _sid  = _s.get("id", "")
+        _name = _s.get("name", "")
+        if "+" in _sid and "-" in _sid and _name:
+            # prefix = everything up to (but not including) the last dash-segment
+            _pfx = _sid.rsplit("-", 1)[0]
+            if _pfx and _pfx not in _prefix_name_map:
+                _prefix_name_map[_pfx] = _name
 
     print(f"[filesystem-scans] Checking {axiom_logs} for completed scans")
     print(f"[filesystem-scans] Checking {axiom_tmp} for running scans")
@@ -2424,7 +2829,7 @@ def discover_scans_from_filesystem():
 
                 logs_scan_entry = {
                     "id": folder,
-                    "name": _name_map.get(folder, folder),
+                    "name": _name_map.get(folder) or _prefix_name_map.get(folder.rsplit("-", 1)[0]) or folder,
                     "module": module,
                     "status": logs_scan_status,
                     "date": timestamp,
@@ -2558,7 +2963,7 @@ def discover_scans_from_filesystem():
 
                 tmp_entry = {
                     "id": folder,
-                    "name": _name_map.get(folder, folder),
+                    "name": _name_map.get(folder) or _prefix_name_map.get(folder.rsplit("-", 1)[0]) or folder,
                     "module": module,
                     "status": final_status,
                     "date": timestamp,
@@ -2588,34 +2993,60 @@ def discover_scans_from_filesystem():
 def run_zsh_command(cmd_str: str, timeout: int = 180):
     """Run a command via zsh login shell so ~/.zshrc is sourced and ~/.axiom path is available.
     Returns CompletedProcess-like dict.
+
+    Runs in its own process group (start_new_session=True) so that on timeout
+    we can kill the whole tree (zsh + any nested children it spawns, e.g.
+    axiom-ls -> aws ec2 describe-regions) via os.killpg. subprocess.run()'s
+    built-in timeout only kills the direct zsh child — any grandchildren it
+    forked keep running as orphans, which is how a single hung AWS region
+    call turns into a pile of stuck processes that never go away and starve
+    the container's CPU.
     """
     print(f"[fleet] Running command via zsh: {cmd_str}")
+    proc = None
     try:
-        # Use zsh -lc to run in a login shell context
-        result = subprocess.run([
-            "/bin/zsh", "-lc", cmd_str
-        ], capture_output=True, text=True, timeout=timeout)
-        
-        print(f"[fleet] Command completed with return code: {result.returncode}")
-        if result.stdout:
-            print(f"[fleet] STDOUT: {result.stdout[:500]}")
-        if result.stderr:
-            print(f"[fleet] STDERR: {result.stderr[:500]}")
-        
+        proc = subprocess.Popen(
+            ["/bin/zsh", "-lc", cmd_str],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        stdout, stderr = proc.communicate(timeout=timeout)
+
+        print(f"[fleet] Command completed with return code: {proc.returncode}")
+        if stdout:
+            print(f"[fleet] STDOUT: {stdout[:500]}")
+        if stderr:
+            print(f"[fleet] STDERR: {stderr[:500]}")
+
         return {
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "returncode": result.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "returncode": proc.returncode,
         }
-    except subprocess.TimeoutExpired as e:
+    except subprocess.TimeoutExpired:
         error_msg = f"Command timed out after {timeout}s"
-        print(f"[fleet] ERROR: {error_msg}")
+        print(f"[fleet] ERROR: {error_msg} - killing process group to avoid orphaned children")
+        if proc is not None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                proc.communicate(timeout=5)
+            except Exception:
+                pass
         return {"stdout": "", "stderr": error_msg, "returncode": -1}
     except Exception as e:
         error_msg = f"Exception running command: {str(e)}"
         print(f"[fleet] ERROR: {error_msg}")
-        import traceback
         traceback.print_exc()
+        if proc is not None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         return {"stdout": "", "stderr": error_msg, "returncode": -1}
 
 @app.route("/api/axiom/fleet/prefixes", methods=["GET", "POST", "DELETE"])
@@ -2905,6 +3336,838 @@ def ax_version():
     })
 
 
+# ─── Workflow runner endpoints ────────────────────────────────────────────────
+# These replace the browser-side Promise scheduler with a reliable Python
+# subprocess that writes verbose per-run logs and a JSON status file.
+# Log/status files live in /tmp/workflow-logs/<run-id>.{log,status.json}.
+
+WF_LOG_DIR = os.environ.get("WF_LOG_DIR", "/tmp/workflow-logs")
+os.makedirs(WF_LOG_DIR, exist_ok=True)
+
+# Map run_id → Popen object so we can abort and properly reap the child.
+_wf_procs: dict = {}  # run_id → subprocess.Popen
+
+
+def _supervise_wf(run_id: str, proc: subprocess.Popen, log_fd) -> None:
+    """Wait for the runner to exit (prevents zombie) and clean up."""
+    try:
+        proc.wait()
+    finally:
+        try:
+            log_fd.close()
+        except Exception:
+            pass
+        _wf_procs.pop(run_id, None)
+        print(f"[workflow] Run {run_id} exited  rc={proc.returncode}")
+
+
+@app.route("/api/workflow/run", methods=["POST"])
+def start_workflow_run():
+    """
+    POST { name, steps, config, initialTargets }
+    Saves the workflow to a temp JSON file, launches workflow-runner.py as a
+    background subprocess, and returns { runId, logFile, statusFile }.
+    """
+    data = request.json or {}
+    if not data.get("steps"):
+        return jsonify({"error": "no steps provided"}), 400
+
+    import uuid as _uuid
+    run_id    = f"wf-{datetime.now(timezone.utc).strftime('%m%d-%H%M%S')}-{_uuid.uuid4().hex[:6]}"
+    wf_file   = os.path.join(WF_LOG_DIR, f"{run_id}.workflow.json")
+    log_file  = os.path.join(WF_LOG_DIR, f"{run_id}.log")
+    stat_file = os.path.join(WF_LOG_DIR, f"{run_id}.status.json")
+
+    os.makedirs(WF_LOG_DIR, exist_ok=True)
+    with open(wf_file, "w") as f:
+        json.dump(data, f, indent=2)
+
+    # Determine path to workflow-runner.py (same directory as this script)
+    runner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflow-runner.py")
+    if not os.path.isfile(runner_path):
+        return jsonify({"error": f"workflow-runner.py not found at {runner_path}"}), 500
+
+    # Pass the static token so the runner can authenticate against the bridge.
+    env = os.environ.copy()
+    _static_tok = os.environ.get("GUI_AX_STATIC_TOKEN", "")
+    if _static_tok:
+        env["WF_BRIDGE_TOKEN"] = _static_tok
+    elif _active_tokens:
+        env["WF_BRIDGE_TOKEN"] = next(iter(_active_tokens))
+
+    print(f"[workflow] Starting run {run_id}  log={log_file}")
+    try:
+        log_fd = open(log_file, "wb")
+        proc = subprocess.Popen(
+            ["python3", runner_path,
+             "--run-id", run_id,
+             "--workflow-file", wf_file],
+            stdout=log_fd,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            close_fds=True,
+            env=env,
+        )
+        # Don't close log_fd here — _supervise_wf does it after proc exits.
+        _wf_procs[run_id] = proc
+        # Supervisor thread: calls proc.wait() so the child is properly reaped
+        # and never becomes a zombie (container PID 1 is tail -f /dev/null).
+        threading.Thread(
+            target=_supervise_wf,
+            args=(run_id, proc, log_fd),
+            daemon=True,
+        ).start()
+    except Exception as e:
+        print(f"[workflow] failed to start runner: {e}")
+        return jsonify({"error": f"failed to start workflow runner: {e}"}), 500
+
+    print(f"[workflow] Run {run_id} started  pid={proc.pid}")
+    return jsonify({
+        "runId":      run_id,
+        "pid":        proc.pid,
+        "logFile":    log_file,
+        "statusFile": stat_file,
+        "message":    f"Workflow started (pid {proc.pid}).  Tail logs: tail -f {log_file}",
+    })
+
+
+@app.route("/api/workflow/<run_id>/status", methods=["GET"])
+def get_workflow_status(run_id: str):
+    """
+    Returns the current status JSON for a workflow run plus the last N log lines.
+    { runId, status, startedAt, endedAt, steps: { id: {...} }, recentLog: [...] }
+    """
+    # Sanitise run_id to prevent path traversal
+    if not re.match(r'^[a-zA-Z0-9_\-]+$', run_id):
+        abort(400)
+
+    stat_file = os.path.join(WF_LOG_DIR, f"{run_id}.status.json")
+    log_file  = os.path.join(WF_LOG_DIR, f"{run_id}.log")
+
+    if not os.path.isfile(stat_file):
+        return jsonify({"error": "run not found", "runId": run_id}), 404
+
+    try:
+        with open(stat_file) as f:
+            status_data = json.load(f)
+    except Exception as e:
+        return jsonify({"error": f"could not read status: {e}"}), 500
+
+    # Append recent log lines (last 100)
+    recent_log = []
+    if os.path.isfile(log_file):
+        try:
+            with open(log_file) as f:
+                lines = f.readlines()
+            recent_log = [l.rstrip("\n") for l in lines[-100:]]
+        except Exception:
+            pass
+
+    status_data["recentLog"] = recent_log
+    return jsonify(status_data)
+
+
+@app.route("/api/workflow/<run_id>/log", methods=["GET"])
+def get_workflow_log(run_id: str):
+    """Returns the full log for a workflow run as plain text."""
+    if not re.match(r'^[a-zA-Z0-9_\-]+$', run_id):
+        abort(400)
+    log_file = os.path.join(WF_LOG_DIR, f"{run_id}.log")
+    if not os.path.isfile(log_file):
+        abort(404)
+    return send_file(log_file, mimetype="text/plain")
+
+
+@app.route("/api/workflow/<run_id>/abort", methods=["POST"])
+def abort_workflow_run(run_id: str):
+    """Kill the workflow runner process for this run."""
+    if not re.match(r'^[a-zA-Z0-9_\-]+$', run_id):
+        abort(400)
+    proc = _wf_procs.get(run_id)
+    killed = False
+    if proc:
+        try:
+            proc.terminate()
+            killed = True
+        except Exception as e:
+            print(f"[workflow] Abort run={run_id}  pid={proc.pid}  error={e}")
+    # Mark as aborted in status file
+    stat_file = os.path.join(WF_LOG_DIR, f"{run_id}.status.json")
+    if os.path.isfile(stat_file):
+        try:
+            with open(stat_file) as f:
+                d = json.load(f)
+            d["status"]  = "aborted"
+            d["endedAt"] = datetime.now(timezone.utc).isoformat() + "Z"
+            with open(stat_file, "w") as f:
+                json.dump(d, f, indent=2)
+        except Exception:
+            pass
+    pid = proc.pid if proc else None
+    print(f"[workflow] Abort run={run_id}  pid={pid}  killed={killed}")
+    return jsonify({"runId": run_id, "killed": killed})
+
+
+# ── MCP server process management ─────────────────────────────────────────────
+# The MCP server (tools/mcp-server.py) is a separate long-running process that
+# exposes the bridge to AI/reporting tools over the Model Context Protocol.
+# These endpoints let the dashboard start/stop it (Settings → MCP Server) and
+# read its status, so operators can turn the integration on or off at will.
+# Only the network transports (streamable-http / sse) are launchable from here —
+# stdio needs a client attached to its stdin and is used via `python3
+# tools/mcp-server.py` directly (e.g. Claude Desktop).
+_mcp_proc = None                 # subprocess.Popen | None
+_mcp_meta: dict = {}             # {transport, host, port, startedAt, actingAs}
+_mcp_log_file = os.path.join(WF_LOG_DIR, "mcp-server.log")
+_mcp_lock = threading.Lock()
+
+
+def _mcp_server_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp-server.py")
+
+
+def _mcp_running() -> bool:
+    return _mcp_proc is not None and _mcp_proc.poll() is None
+
+
+def _supervise_mcp(proc, log_fd) -> None:
+    """Reap the MCP process when it exits (avoids zombies) and close its log."""
+    try:
+        proc.wait()
+    finally:
+        try:
+            log_fd.close()
+        except Exception:
+            pass
+        print(f"[mcp] server exited  rc={proc.returncode}")
+
+
+def _mcp_status_payload() -> dict:
+    tail = []
+    if os.path.isfile(_mcp_log_file):
+        try:
+            with open(_mcp_log_file, errors="replace") as f:
+                tail = [l.rstrip("\n") for l in f.readlines()[-40:]]
+        except Exception:
+            pass
+    running = _mcp_running()
+    host = _mcp_meta.get("host")
+    port = _mcp_meta.get("port")
+    transport = _mcp_meta.get("transport")
+    endpoint = None
+    if running and host and port:
+        # streamable-http serves at /mcp; sse serves at /sse
+        path = "/mcp" if transport == "streamable-http" else "/sse"
+        shown_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+        endpoint = f"http://{shown_host}:{port}{path}"
+    return {
+        "running":   running,
+        "available": os.path.isfile(_mcp_server_path()),
+        "pid":       _mcp_proc.pid if running else None,
+        "transport": transport,
+        "host":      host,
+        "port":      port,
+        "endpoint":  endpoint,
+        "actingAs":  _mcp_meta.get("actingAs"),
+        "startedAt": _mcp_meta.get("startedAt"),
+        "logTail":   tail,
+    }
+
+
+@app.route("/api/mcp/status", methods=["GET"])
+def mcp_status():
+    """Report whether the MCP server subprocess is running, plus its endpoint
+    and the tail of its log."""
+    return jsonify(_mcp_status_payload())
+
+
+@app.route("/api/mcp/start", methods=["POST"])
+def mcp_start():
+    """Start the MCP server as a background subprocess (network transport only).
+    Body: { transport?: "streamable-http"|"sse", host?, port? }.
+    It is pointed back at this bridge and authenticated as the calling account."""
+    err = _require_admin()
+    if err:
+        return err
+    global _mcp_proc, _mcp_meta
+    data = request.json or {}
+    transport = data.get("transport") or "streamable-http"
+    if transport not in ("streamable-http", "sse"):
+        return jsonify({"error": "transport must be 'streamable-http' or 'sse' "
+                                 "(stdio is launched directly, not from the UI)"}), 400
+    host = data.get("host") or "0.0.0.0"
+    try:
+        port = int(data.get("port") or 8787)
+    except (TypeError, ValueError):
+        return jsonify({"error": "port must be a number"}), 400
+
+    server_path = _mcp_server_path()
+    if not os.path.isfile(server_path):
+        return jsonify({"error": f"mcp-server.py not found at {server_path}"}), 500
+
+    with _mcp_lock:
+        if _mcp_running():
+            return jsonify({"error": "MCP server already running",
+                            **_mcp_status_payload()}), 409
+
+        # Point the MCP server back at this bridge and hand it a token so it acts
+        # as the calling account (falls back to the static token / any active one).
+        env = os.environ.copy()
+        env["GUIAX_BRIDGE_URL"] = f"http://127.0.0.1:{os.environ.get('PORT', '5000')}"
+        tok = _token_from_request() or os.environ.get("GUI_AX_STATIC_TOKEN", "")
+        if not tok and _active_tokens:
+            tok = next(iter(_active_tokens))
+        if tok:
+            env["GUIAX_TOKEN"] = tok
+
+        acting_as = None
+        store = load_store()
+        caller = _caller_user(store)
+        if caller:
+            acting_as = caller.get("username")
+
+        os.makedirs(WF_LOG_DIR, exist_ok=True)
+        try:
+            log_fd = open(_mcp_log_file, "wb")
+            proc = subprocess.Popen(
+                ["python3", server_path,
+                 "--transport", transport, "--host", host, "--port", str(port)],
+                stdout=log_fd,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                close_fds=True,
+                env=env,
+            )
+        except Exception as e:
+            return jsonify({"error": f"failed to start MCP server: {e}"}), 500
+
+        _mcp_proc = proc
+        _mcp_meta = {
+            "transport": transport,
+            "host":      host,
+            "port":      port,
+            "actingAs":  acting_as,
+            "startedAt": datetime.now(timezone.utc).isoformat() + "Z",
+        }
+        threading.Thread(target=_supervise_mcp, args=(proc, log_fd), daemon=True).start()
+        print(f"[mcp] started  pid={proc.pid}  transport={transport}  {host}:{port}")
+
+    return jsonify({"message": f"MCP server started (pid {proc.pid}).",
+                    **_mcp_status_payload()})
+
+
+@app.route("/api/mcp/stop", methods=["POST"])
+def mcp_stop():
+    """Stop the running MCP server subprocess."""
+    err = _require_admin()
+    if err:
+        return err
+    global _mcp_proc
+    with _mcp_lock:
+        if not _mcp_running():
+            _mcp_proc = None
+            return jsonify({"message": "MCP server was not running",
+                            **_mcp_status_payload()})
+        pid = _mcp_proc.pid
+        try:
+            _mcp_proc.terminate()
+            try:
+                _mcp_proc.wait(timeout=5)
+            except Exception:
+                _mcp_proc.kill()
+        except Exception as e:
+            return jsonify({"error": f"failed to stop MCP server: {e}"}), 500
+        _mcp_proc = None
+        _mcp_meta.clear()
+        print(f"[mcp] stopped  pid={pid}")
+    return jsonify({"message": "MCP server stopped", **_mcp_status_payload()})
+
+
+# ── User / Team / Invite management ──────────────────────────────────────────
+# Data is stored inside the existing JSON store under keys:
+#   store["users"]   — list of user dicts
+#   store["teams"]   — list of team dicts
+#   store["invites"] — list of invite dicts
+#
+# Passwords are stored as SHA-256 hex digests.  Not bcrypt, but fine for a
+# single-instance recon dashboard where the real security boundary is the
+# network perimeter.
+
+import hashlib
+
+def _hash_pw(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def _check_pw(password: str, hashed: str) -> bool:
+    return secrets.compare_digest(_hash_pw(password), hashed)
+
+def _get_users(store):
+    return store.setdefault("users", [])
+
+def _get_teams(store):
+    return store.setdefault("teams", [])
+
+def _get_invites(store):
+    return store.setdefault("invites", [])
+
+def _require_admin():
+    """Return 403 if the caller is not an admin.  Returns None when OK."""
+    store = load_store()
+    token = _token_from_request()
+    # Find the user associated with this token
+    caller = next(
+        (u for u in _get_users(store) if u.get("token") == token),
+        None,
+    )
+    if caller is None:
+        # Fall back: if no users exist yet the legacy single-user admin is caller
+        if not _get_users(store):
+            return None
+        return jsonify({"error": "forbidden"}), 403
+    if caller.get("role") != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    return None
+
+def _caller_user(store):
+    """Return the AppUser dict for the current request's token, or None."""
+    token = _token_from_request()
+    return next((u for u in _get_users(store) if u.get("token") == token), None)
+
+def _ensure_admin_user():
+    """Bootstrap the admin user from env-vars if the users list is empty.
+    Also re-registers any persisted user tokens into _active_tokens so
+    existing sessions survive a bridge restart."""
+    store = load_store()
+    users = _get_users(store)
+
+    # Re-hydrate active tokens from persisted user records
+    for u in users:
+        t = u.get("token")
+        if t:
+            _active_tokens.add(t)
+
+    if users:
+        return  # already bootstrapped
+
+    if not AUTH_PASSWORD:
+        return
+
+    admin = {
+        "id":           secrets.token_hex(8),
+        "username":     AUTH_USERNAME,
+        "email":        "",
+        "role":         "admin",
+        "teams":        [],
+        "createdAt":    datetime.now(timezone.utc).isoformat(),
+        "lastLogin":    None,
+        "active":       True,
+        "passwordHash": _hash_pw(AUTH_PASSWORD),
+        "token":        None,
+    }
+    users.append(admin)
+    store["users"] = users
+    save_store(store)
+
+
+# ── Patch auth_login to also issue/persist token on the user record ────────────
+
+_original_auth_login = None  # will be set after the existing route is defined
+
+def _update_user_token_and_last_login(username: str, token: str):
+    """After a successful login, store the token on the matching user record."""
+    store = load_store()
+    users = _get_users(store)
+    changed = False
+    for u in users:
+        if u.get("username") == username:
+            u["token"] = token
+            u["lastLogin"] = datetime.now(timezone.utc).isoformat()
+            changed = True
+            break
+    if changed:
+        store["users"] = users
+        save_store(store)
+
+
+# ── /api/users ────────────────────────────────────────────────────────────────
+
+@app.route("/api/users", methods=["GET"])
+def list_users():
+    err = _require_admin()
+    if err:
+        return err
+    store = load_store()
+    # Strip passwordHash and token before sending
+    safe = [{k: v for k, v in u.items() if k not in ("passwordHash", "token")}
+            for u in _get_users(store)]
+    return jsonify(safe)
+
+
+@app.route("/api/users", methods=["POST"])
+def create_user():
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password", "")
+    email    = (data.get("email") or "").strip()
+    role     = data.get("role", "user")
+
+    if not username:
+        return jsonify({"error": "username is required"}), 400
+    if len(password) < 8:
+        return jsonify({"error": "password must be at least 8 characters"}), 400
+    if role not in ("admin", "user"):
+        role = "user"
+
+    store = load_store()
+    users = _get_users(store)
+    if any(u["username"] == username for u in users):
+        return jsonify({"error": "username already exists"}), 409
+
+    new_user = {
+        "id":           secrets.token_hex(8),
+        "username":     username,
+        "email":        email,
+        "role":         role,
+        "teams":        [],
+        "createdAt":    datetime.now(timezone.utc).isoformat(),
+        "lastLogin":    None,
+        "active":       True,
+        "passwordHash": _hash_pw(password),
+        "token":        None,
+    }
+    users.append(new_user)
+    store["users"] = users
+    save_store(store)
+    safe = {k: v for k, v in new_user.items() if k not in ("passwordHash", "token")}
+    return jsonify(safe), 201
+
+
+@app.route("/api/users/me", methods=["GET"])
+def get_me():
+    store = load_store()
+    user = _caller_user(store)
+    if user is None:
+        # Legacy single-user mode — synthesise a response
+        return jsonify({
+            "id": "admin",
+            "username": AUTH_USERNAME,
+            "email": "",
+            "role": "admin",
+            "teams": [],
+            "createdAt": None,
+            "lastLogin": None,
+            "active": True,
+        })
+    safe = {k: v for k, v in user.items() if k not in ("passwordHash", "token")}
+    return jsonify(safe)
+
+
+@app.route("/api/users/me/password", methods=["PUT"])
+def change_my_password():
+    store = load_store()
+    data = request.get_json(silent=True) or {}
+    current_pw = data.get("currentPassword", "")
+    new_pw     = data.get("newPassword", "")
+
+    if len(new_pw) < 8:
+        return jsonify({"error": "password must be at least 8 characters"}), 400
+
+    user = _caller_user(store)
+    if user is None:
+        # Legacy mode — compare against env var password
+        if not AUTH_PASSWORD or not secrets.compare_digest(current_pw, AUTH_PASSWORD):
+            return jsonify({"error": "Current password is incorrect"}), 403
+        return jsonify({"ok": True, "note": "legacy mode — restart bridge to apply env password change"})
+
+    if not _check_pw(current_pw, user.get("passwordHash", "")):
+        return jsonify({"error": "Current password is incorrect"}), 403
+
+    users = _get_users(store)
+    for u in users:
+        if u["id"] == user["id"]:
+            u["passwordHash"] = _hash_pw(new_pw)
+            break
+    store["users"] = users
+    save_store(store)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/users/<user_id>", methods=["PATCH"])
+def update_user(user_id):
+    err = _require_admin()
+    if err:
+        return err
+    store = load_store()
+    users = _get_users(store)
+    user = next((u for u in users if u["id"] == user_id), None)
+    if user is None:
+        return jsonify({"error": "user not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    if "role" in data and data["role"] in ("admin", "user"):
+        user["role"] = data["role"]
+    if "teams" in data and isinstance(data["teams"], list):
+        user["teams"] = data["teams"]
+    if "email" in data:
+        user["email"] = (data["email"] or "").strip()
+    if "active" in data:
+        user["active"] = bool(data["active"])
+
+    store["users"] = users
+    save_store(store)
+    safe = {k: v for k, v in user.items() if k not in ("passwordHash", "token")}
+    return jsonify(safe)
+
+
+@app.route("/api/users/<user_id>/password", methods=["PUT"])
+def reset_user_password(user_id):
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    new_pw = data.get("newPassword", "")
+    if len(new_pw) < 8:
+        return jsonify({"error": "password must be at least 8 characters"}), 400
+
+    store = load_store()
+    users = _get_users(store)
+    user = next((u for u in users if u["id"] == user_id), None)
+    if user is None:
+        return jsonify({"error": "user not found"}), 404
+
+    user["passwordHash"] = _hash_pw(new_pw)
+    # Invalidate existing token so the user must log in again
+    user["token"] = None
+    store["users"] = users
+    save_store(store)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/users/<user_id>", methods=["DELETE"])
+def delete_user(user_id):
+    err = _require_admin()
+    if err:
+        return err
+    store = load_store()
+    users = _get_users(store)
+    before = len(users)
+    store["users"] = [u for u in users if u["id"] != user_id]
+    if len(store["users"]) == before:
+        return jsonify({"error": "user not found"}), 404
+    save_store(store)
+    return jsonify({"ok": True})
+
+
+# ── /api/teams ────────────────────────────────────────────────────────────────
+
+@app.route("/api/teams", methods=["GET"])
+def list_teams():
+    store = load_store()
+    return jsonify(_get_teams(store))
+
+
+@app.route("/api/teams", methods=["POST"])
+def create_team():
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    store = load_store()
+    teams = _get_teams(store)
+    if any(t["name"] == name for t in teams):
+        return jsonify({"error": "team name already exists"}), 409
+
+    team = {
+        "id":          secrets.token_hex(8),
+        "name":        name,
+        "description": (data.get("description") or "").strip(),
+        "targetIds":   [],
+        "memberIds":   [],
+        "createdAt":   datetime.now(timezone.utc).isoformat(),
+    }
+    teams.append(team)
+    store["teams"] = teams
+    save_store(store)
+    return jsonify(team), 201
+
+
+@app.route("/api/teams/<team_id>", methods=["DELETE"])
+def delete_team(team_id):
+    err = _require_admin()
+    if err:
+        return err
+    store = load_store()
+    teams = _get_teams(store)
+    before = len(teams)
+    store["teams"] = [t for t in teams if t["id"] != team_id]
+    if len(store["teams"]) == before:
+        return jsonify({"error": "team not found"}), 404
+    save_store(store)
+    return jsonify({"ok": True})
+
+
+# ── /api/invites ──────────────────────────────────────────────────────────────
+
+@app.route("/api/invites", methods=["GET"])
+def list_invites():
+    err = _require_admin()
+    if err:
+        return err
+    store = load_store()
+    return jsonify(_get_invites(store))
+
+
+@app.route("/api/invites/my", methods=["GET"])
+def my_invites():
+    """Return invites visible to the current user (admin sees all, user sees none by default)."""
+    store = load_store()
+    user = _caller_user(store)
+    if user and user.get("role") == "admin":
+        return jsonify(_get_invites(store))
+    return jsonify([])
+
+
+@app.route("/api/invites", methods=["POST"])
+def create_invite():
+    err = _require_admin()
+    if err:
+        return err
+    data     = request.get_json(silent=True) or {}
+    team_id  = data.get("teamId", "")
+    max_uses = int(data.get("maxUses", 5))
+    expiry_d = int(data.get("expiryDays", 7))
+
+    store = load_store()
+    team  = next((t for t in _get_teams(store) if t["id"] == team_id), None)
+    if team is None:
+        return jsonify({"error": "team not found"}), 404
+
+    caller = _caller_user(store)
+    created_by = caller["username"] if caller else AUTH_USERNAME
+
+    from datetime import timedelta
+    invite = {
+        "id":         secrets.token_hex(8),
+        "token":      secrets.token_urlsafe(24),
+        "teamId":     team_id,
+        "teamName":   team["name"],
+        "createdBy":  created_by,
+        "expiresAt":  (datetime.now(timezone.utc) + timedelta(days=expiry_d)).isoformat(),
+        "usedBy":     None,
+        "usedAt":     None,
+        "maxUses":    max_uses,
+        "useCount":   0,
+    }
+    invites = _get_invites(store)
+    invites.append(invite)
+    store["invites"] = invites
+    save_store(store)
+    return jsonify(invite), 201
+
+
+@app.route("/api/invites/accept", methods=["POST"])
+def accept_invite():
+    data  = request.get_json(silent=True) or {}
+    token = (data.get("token") or "").strip()
+    # Strip full URL down to just the token
+    if "/" in token:
+        token = token.rstrip("/").split("/")[-1]
+
+    if not token:
+        return jsonify({"error": "token is required"}), 400
+
+    store   = load_store()
+    invites = _get_invites(store)
+    invite  = next((i for i in invites if i["token"] == token), None)
+
+    if invite is None:
+        return jsonify({"error": "invite not found"}), 404
+    if invite["expiresAt"]:
+        try:
+            exp = datetime.fromisoformat(invite["expiresAt"].replace("Z", "+00:00"))
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) > exp:
+                return jsonify({"error": "invite has expired"}), 410
+        except Exception:
+            pass  # malformed date — allow through rather than blocking
+    if invite["useCount"] >= invite["maxUses"]:
+        return jsonify({"error": "invite has reached its maximum uses"}), 410
+
+    # Add caller to the team
+    teams = _get_teams(store)
+    for t in teams:
+        if t["id"] == invite["teamId"]:
+            if _caller_user(store) and _caller_user(store)["id"] not in t["memberIds"]:
+                t["memberIds"].append(_caller_user(store)["id"])
+            break
+
+    # Update invite counters
+    invite["useCount"] += 1
+    caller = _caller_user(store)
+    if caller:
+        invite["usedBy"] = caller["username"]
+        invite["usedAt"] = datetime.now(timezone.utc).isoformat()
+        # Also add team to user's teams list
+        users = _get_users(store)
+        for u in users:
+            if u["id"] == caller["id"] and invite["teamId"] not in u["teams"]:
+                u["teams"].append(invite["teamId"])
+        store["users"] = users
+
+    store["teams"]   = teams
+    store["invites"] = invites
+    save_store(store)
+    return jsonify({"ok": True, "teamName": invite["teamName"]})
+
+
+@app.route("/api/invites/<invite_id>", methods=["DELETE"])
+def revoke_invite(invite_id):
+    err = _require_admin()
+    if err:
+        return err
+    store = load_store()
+    invites = _get_invites(store)
+    before = len(invites)
+    store["invites"] = [i for i in invites if i["id"] != invite_id]
+    if len(store["invites"]) == before:
+        return jsonify({"error": "invite not found"}), 404
+    save_store(store)
+    return jsonify({"ok": True})
+
+
+# ── Patch login to persist token on user record ───────────────────────────────
+# We wrap app.view_functions["auth_login"] after it's been registered so we can
+# call the original handler and then side-effect the user store.
+
+_orig_login = app.view_functions.get("auth_login")
+
+def _patched_login():
+    resp = _orig_login()
+    # Flask can return (response, status) or just response
+    body = resp[0] if isinstance(resp, tuple) else resp
+    try:
+        payload = body.get_json()
+        if payload and payload.get("ok") and payload.get("token"):
+            _update_user_token_and_last_login(
+                request.get_json(silent=True).get("username", ""),
+                payload["token"],
+            )
+    except Exception:
+        pass
+    return resp
+
+if _orig_login:
+    app.view_functions["auth_login"] = _patched_login
+
+
 if __name__ == "__main__":
     os.makedirs(IMPORTS_PATH, exist_ok=True)
     os.makedirs(PROCESSED_PATH, exist_ok=True)
@@ -2928,16 +4191,17 @@ if __name__ == "__main__":
     # Back-fill human-readable scan names onto any existing gowitness targets
     patch_gowitness_names()
 
+    # Bootstrap admin user from env-vars on first run
+    _ensure_admin_user()
+
     # ── Start periodic background scanner ────────────────────────────────
     # Replaces the watchdog Observer so we never poll at the 1-second default
     # rate that PollingObserver uses on Docker/NFS volumes.
     watcher_thread = threading.Thread(target=_import_watcher_thread, daemon=True)
     watcher_thread.start()
-    print(f"[watcher] Periodic import scan every {WATCHER_INTERVAL}s "
-          f"(set WATCHER_INTERVAL env to change)  "
-          f"— or call GET /api/imports/scan to trigger immediately")
+    print(f"[watcher] Periodic import scan every {WATCHER_INTERVAL}s \n (set WATCHER_INTERVAL env to change) \n— or call GET /api/imports/scan to trigger immediately")
 
-    print(f"\nAxiom bridge running on port {PORT}")
+    print(f"Axiom bridge running on port {PORT}")
     print(f"  AXIOM_LS_PATH: {AXIOM_LS_PATH}")
     print(f"  AXIOM_TMP:     {AXIOM_TMP}")
     print(f"  STORE:         {STORE_PATH}")

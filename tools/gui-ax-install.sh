@@ -222,8 +222,10 @@ check_pip() {
 }
 
 install_python_deps() {
-    step "Installing Python bridge dependencies (Flask, flask-cors)"
-    "$PYTHON_CMD" -m pip install --user flask flask-cors 2>&1 | tail -5
+    step "Installing Python bridge dependencies (Flask, flask-cors, geoip2, mcp)"
+    # geoip2 enables the optional offline IP-geolocation source for the Geo Map;
+    # mcp + httpx power the optional MCP server (tools/mcp-server.py). All optional.
+    "$PYTHON_CMD" -m pip install --user flask flask-cors geoip2 mcp httpx 2>&1 | tail -5
     success "Python dependencies installed"
 }
 

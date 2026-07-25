@@ -22,228 +22,12 @@ import { Textarea } from "./ui/textarea";
 import { Checkbox } from "./ui/checkbox";
 import { Rocket, Upload, AlertCircle, X } from "lucide-react";
 import { Alert, AlertDescription } from "./ui/alert";
-
-// All tools available per Axiom Packer provisioner image (Go + non-Go combined)
-const PROVISIONER_TOOLS: Record<string, string[]> = {
-  barebones: [
-    "anew",
-    "cero",
-    "commix",
-    "corsy",
-    "dnsx",
-    "dnsgen",
-    "dnsrecon",
-    "exec",
-    "gorgo",
-    "gowitness",
-    "httpx",
-    "ipcdn",
-    "linkfinder",
-    "masscan",
-    "nmap",
-    "nuclei",
-    "openredirex",
-    "paramspider",
-    "subfinder",
-    "trufflehog",
-  ],
-  default: [
-    "amass",
-    "anew",
-    "aquatone",
-    "arjun",
-    "assetfinder",
-    "cero",
-    "chaos-client",
-    "commix",
-    "crlfuzz",
-    "dalfox",
-    "dirdar",
-    "dirsearch",
-    "dnscewl",
-    "dnsx",
-    "dnsvalidator",
-    "feroxbuster",
-    "ffuf",
-    "gau",
-    "gauplus",
-    "gobuster",
-    "gospider",
-    "gowitness",
-    "gxss",
-    "hakrawler",
-    "hakrevdns",
-    "httprobe",
-    "httpx",
-    "interactsh-client",
-    "ipcdn",
-    "jaeles",
-    "katana",
-    "kiterunner",
-    "kxss",
-    "masscan",
-    "massdns",
-    "meg",
-    "naabu",
-    "nmap",
-    "nuclei",
-    "puredns",
-    "rustscan",
-    "s3scanner",
-    "scrying",
-    "shuffledns",
-    "sqlmap",
-    "subfinder",
-    "subjs",
-    "testssl",
-    "tlsx",
-    "trufflehog",
-    "unimap",
-    "wafw00f",
-    "waybackurls",
-    "webscreenshot",
-    "whois",
-    "wpscan",
-  ],
-  reconftw: [
-    "amass",
-    "anew",
-    "arjun",
-    "assetfinder",
-    "brutespray",
-    "cf-check",
-    "cmseek",
-    "corsy",
-    "dirsearch",
-    "dnsx",
-    "dnsgen",
-    "dnsrecon",
-    "emailfinder",
-    "ffuf",
-    "gau",
-    "getjswords",
-    "gf",
-    "gitdorker",
-    "github-subdomains",
-    "gospider",
-    "gotator",
-    "gowitness",
-    "h8mail",
-    "hakrawler",
-    "httpx",
-    "interactsh-client",
-    "jsa",
-    "katana",
-    "linkfinder",
-    "metafinder",
-    "nmap",
-    "nuclei",
-    "openredirex",
-    "oralyzer",
-    "ppfuzz",
-    "puredns",
-    "reconftw",
-    "s3scanner",
-    "subfinder",
-    "subjs",
-    "testssl",
-    "theharvester",
-    "udork",
-    "unimap",
-    "waybackurls",
-    "webscreenshot",
-  ],
-  extras: [
-    "amass",
-    "anew",
-    "aquatone",
-    "arjun",
-    "assetfinder",
-    "aws-cli",
-    "cero",
-    "chaos-client",
-    "cloud_enum",
-    "commix",
-    "crlfuzz",
-    "dalfox",
-    "dirsearch",
-    "dnsx",
-    "dnsvalidator",
-    "droopescan",
-    "feroxbuster",
-    "ffuf",
-    "gau",
-    "gauplus",
-    "gobuster",
-    "gospider",
-    "gowitness",
-    "gxss",
-    "hakrawler",
-    "hakrevdns",
-    "httprobe",
-    "httpx",
-    "interactsh-client",
-    "ipcdn",
-    "jaeles",
-    "katana",
-    "kiterunner",
-    "kxss",
-    "linkfinder",
-    "masscan",
-    "massdns",
-    "meg",
-    "naabu",
-    "nmap",
-    "nuclei",
-    "puredns",
-    "rustscan",
-    "s3scanner",
-    "scrying",
-    "secretfinder",
-    "shuffledns",
-    "sqlmap",
-    "subfinder",
-    "subjs",
-    "testssl",
-    "tlsx",
-    "trufflehog",
-    "unimap",
-    "wafw00f",
-    "waybackurls",
-    "webscreenshot",
-    "whois",
-    "wpscan",
-  ],
-};
-
-const PROVISIONER_LABELS: Record<string, string> = {
-  barebones: "Barebones",
-  default: "Default",
-  reconftw: "ReconFTW",
-  extras: "Extras",
-};
-
-/** Returns true if module is likely available for the given provisioner */
-const isModuleAvailable = (
-  moduleName: string,
-  provisioner: string,
-): boolean => {
-  if (!provisioner || provisioner === "unknown") return true;
-  const tools = PROVISIONER_TOOLS[provisioner.toLowerCase()] ?? [];
-  if (!tools.length) return true;
-  const mod = moduleName.toLowerCase();
-  return tools.some((tool) => mod.includes(tool) || tool.includes(mod));
-};
-
-/** Finds which provisioners include this module (for tooltip text) */
-const getRequiredProvisioners = (moduleName: string): string[] => {
-  return Object.entries(PROVISIONER_TOOLS)
-    .filter(([, tools]) => {
-      const mod = moduleName.toLowerCase();
-      return tools.some((t) => mod.includes(t) || t.includes(mod));
-    })
-    .map(([key]) => PROVISIONER_LABELS[key] ?? key);
-};
+import {
+  PROVISIONER_TOOLS,
+  PROVISIONER_LABELS,
+  isModuleAvailable,
+  getRequiredProvisioners,
+} from "../services/provisioner";
 
 interface ScanLauncherProps {
   apiUrl: string;
@@ -299,10 +83,40 @@ export default function ScanLauncher({
   );
   const [gowitnesRmWarn, setGowitnesRmWarn] = useState(false);
 
+  // Team context
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<string>("");
+
   useEffect(() => {
     fetchModules();
     fetchProvisioner();
+    fetchTeams();
   }, []);
+
+  const fetchTeams = async () => {
+    try {
+      const [meRes, teamsRes] = await Promise.all([
+        fetch(`${apiUrl}/api/users/me`, { credentials: "include" }),
+        fetch(`${apiUrl}/api/teams`, { credentials: "include" }),
+      ]);
+      if (meRes.ok && teamsRes.ok) {
+        const me = await meRes.json();
+        const all: { id: string; name: string; createdAt: string }[] =
+          await teamsRes.json();
+        // Newest joined team first
+        const myTeams = all
+          .filter((t) => me.teams?.includes(t.id))
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          );
+        setTeams(myTeams);
+        if (myTeams.length > 0) setSelectedTeamId(myTeams[0].id);
+      }
+    } catch {
+      // backend may not support teams yet
+    }
+  };
 
   const fetchModules = async () => {
     try {
@@ -355,15 +169,24 @@ export default function ScanLauncher({
     setLaunching(true);
 
     try {
-      // Auto-generate output file if not provided
-      const finalOutputFile = outputFile || `${scanName}-${module}.txt`;
+      // Prepend team slug prefix when a team is selected
+      const teamSlug =
+        selectedTeamId && teams.find((t) => t.id === selectedTeamId)
+          ? teams
+              .find((t) => t.id === selectedTeamId)!
+              .name.toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/^-+|-+$/g, "")
+          : "";
+      const prefixedScanName = teamSlug ? `${teamSlug}/${scanName}` : scanName;
+      const finalOutputFile = outputFile || `${prefixedScanName}-${module}.txt`;
       console.log(
         "[ScanLauncher] Auto-generated output file:",
         finalOutputFile,
       );
 
       const payload = {
-        scanName,
+        scanName: prefixedScanName,
         targets: targets.split("\n").filter((t) => t.trim()),
         module,
         outputFile: finalOutputFile,
@@ -693,6 +516,39 @@ export default function ScanLauncher({
         </div>
 
         <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 space-y-6">
+          {/* Project Team (optional) */}
+          <div>
+            <Label className="text-slate-300">
+              Project Team{" "}
+              <span className="text-slate-500 font-normal">(optional)</span>
+            </Label>
+            <select
+              value={selectedTeamId}
+              onChange={(e) => setSelectedTeamId(e.target.value)}
+              className="mt-1.5 w-full bg-slate-900 border border-slate-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:border-primary-500 font-mono"
+            >
+              <option value="">— No team / personal scan —</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            {selectedTeamId && teams.find((t) => t.id === selectedTeamId) && (
+              <p className="text-xs text-slate-500 mt-1.5 font-mono">
+                Scan will be prefixed:{" "}
+                <span className="text-primary-400">
+                  {teams
+                    .find((t) => t.id === selectedTeamId)!
+                    .name.toLowerCase()
+                    .replace(/[^a-z0-9]+/g, "-")
+                    .replace(/^-+|-+$/g, "")}
+                  /{scanName || "scan-name"}
+                </span>
+              </p>
+            )}
+          </div>
+
           {/* Scan Name */}
           <div>
             <Label htmlFor="scanName" className="text-slate-300">
@@ -718,7 +574,15 @@ export default function ScanLauncher({
                 <>
                   Results will be saved as{" "}
                   <span className="text-primary-400 font-mono">
-                    {scanName || "scan-name"}-{module || "module"}.txt
+                    {selectedTeamId &&
+                    teams.find((t) => t.id === selectedTeamId)
+                      ? `${teams
+                          .find((t) => t.id === selectedTeamId)!
+                          .name.toLowerCase()
+                          .replace(/[^a-z0-9]+/g, "-")
+                          .replace(/^-+|-+$/g, "")}/${scanName || "scan-name"}`
+                      : scanName || "scan-name"}
+                    -{module || "module"}.txt
                   </span>
                 </>
               )}

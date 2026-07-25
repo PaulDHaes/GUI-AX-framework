@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -15,6 +21,7 @@ import {
   Server,
   Activity,
   Bell,
+  User,
   ChevronRight,
   ChevronDown,
   LayoutDashboard,
@@ -25,6 +32,10 @@ import {
   Download,
   Copy,
   Filter,
+  Layers,
+  LogOut,
+  Shield,
+  Users,
 } from "lucide-react";
 import ScanLauncher from "./components/ScanLauncher";
 import ActiveScans from "./components/ActiveScans";
@@ -34,10 +45,22 @@ import TopologyGraph from "./components/TopologyGraph";
 import Settings from "./components/Settings";
 import GeoMap from "./components/GeoMap";
 import BinocularsSkullLogo from "./components/ui/BinocularsSkullLogo";
+import WorkflowBuilder from "./components/WorkflowBuilder";
+import LoginPage from "./components/LoginPage";
+import UserProfile from "./components/UserProfile";
+import AdminPanel from "./components/AdminPanel";
 // Types
-import type { Target, FleetInstance } from "./types";
+import type { Target, FleetInstance, ProjectTeam } from "./types";
 // Severity enum (if not imported from types)
 import { Severity } from "./types";
+
+// ── Team slug helper (must match ScanLauncher prefix logic) ─────────────────
+function toTeamSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 // ── Notification System ─────────────────────────────────────
 interface AppNotification {
@@ -1605,7 +1628,7 @@ const TargetDetail = ({ target }: { target: Target }) => {
 
 // ------------- Layout -------------
 
-const Sidebar = () => {
+const Sidebar = ({ role }: { role?: string | null }) => {
   const location = useLocation();
   const [expandedGroups, setExpandedGroups] = useState<string[]>(() =>
     location.pathname.startsWith("/scans") ? ["scans"] : [],
@@ -1736,7 +1759,7 @@ const Sidebar = () => {
         <BinocularsSkullLogo size={32} />
         <div>
           <div className="text-[16px] font-bold text-white leading-none tracking-wide">
-            AXIOM<span className="text-primary-400">DASH</span>
+            AX<span className="text-primary-400">DASH</span>
           </div>
           <div className="text-[13px] text-white-500 font-mono mt-0.5">
             Recon Platform
@@ -1753,6 +1776,7 @@ const Sidebar = () => {
           <NavLink to="/" icon={LayoutDashboard} label="Dashboard" />
           <NavLink to="/targets" icon={TargetIcon} label="Targets" />
           <NavLink to="/vulns" icon={ShieldAlert} label="Vulnerabilities" />
+          <NavLink to="/workflow" icon={Layers} label="Workflows" />
           <NavGroup groupKey="scans" icon={Activity} label="Scans">
             <SubLink to="/scans?tab=launcher" label="Launch Scan" />
             <SubLink to="/scans?tab=active" label="Active / Monitor" />
@@ -1768,6 +1792,15 @@ const Sidebar = () => {
         </div>
         <div>
           <p className="text-[11px] uppercase tracking-widest text-white-600 font-mono mb-2 px-2.5">
+            Account
+          </p>
+          <NavLink to="/profile" icon={User} label="My Profile" />
+          {(role === "admin" || role === null) && (
+            <NavLink to="/admin" icon={Shield} label="Admin" />
+          )}
+        </div>
+        <div>
+          <p className="text-[11px] uppercase tracking-widest text-white-600 font-mono mb-2 px-2.5">
             Help
           </p>
           <NavLink to="/docs" icon={BookOpen} label="Documentation" />
@@ -1780,19 +1813,26 @@ const Sidebar = () => {
 const Header = ({
   unreadCount = 0,
   onBellClick,
+  onLogout,
+  username,
 }: {
   unreadCount?: number;
   onBellClick?: () => void;
+  onLogout?: () => void;
+  username?: string | null;
 }) => {
   const location = useLocation();
   const pageLabels: Record<string, string> = {
     "/": "Dashboard",
     "/targets": "Targets",
     "/vulns": "Vulnerabilities",
+    "/workflow": "Workflows",
     "/scans": "Scans",
     "/fleet": "Fleet",
     "/docs": "Documentation",
     "/settings": "Settings",
+    "/profile": "My Profile",
+    "/admin": "Admin Panel",
   };
   const currentPage = Object.entries(pageLabels).find(([path]) =>
     path === "/"
@@ -1805,7 +1845,7 @@ const Header = ({
     <header className="h-12 bg-dark-900 border-b border-dark-700 sticky top-0 z-20 flex items-center justify-between px-5 ml-56">
       {/* Left: breadcrumb */}
       <div className="flex items-center gap-1.5 text-sm">
-        <span className="text-white-600 font-mono text-xs">axiom /</span>
+        <span className="text-white-600 font-mono text-xs">ax /</span>
         <span className="text-white-200 text-xs font-mono">{pageTitle}</span>
       </div>
 
@@ -1827,6 +1867,40 @@ const Header = ({
             </span>
           )}
         </button>
+        {username && (
+          <>
+            <div className="h-4 w-px bg-dark-700" />
+            <Link
+              to="/profile"
+              className="flex items-center gap-2 bg-dark-800 border border-dark-700 rounded-lg px-2.5 py-1 hover:border-primary-500/40 transition-colors"
+            >
+              <div className="w-5 h-5 rounded-full bg-primary-600/30 border border-primary-500/40 flex items-center justify-center flex-shrink-0">
+                <span className="text-[9px] font-bold text-primary-300 uppercase select-none">
+                  {username[0]}
+                </span>
+              </div>
+              <span
+                className="text-[11px] font-mono text-white-400 max-w-[80px] truncate"
+                title={username}
+              >
+                {username}
+              </span>
+            </Link>
+          </>
+        )}
+        {onLogout && (
+          <>
+            <div className="h-4 w-px bg-dark-700" />
+            <button
+              onClick={onLogout}
+              title="Sign out"
+              className="flex items-center gap-1.5 px-2 py-1 text-white-500 hover:text-red-400 transition-colors rounded-lg hover:bg-red-500/10 text-xs font-mono"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>sign out</span>
+            </button>
+          </>
+        )}
       </div>
     </header>
   );
@@ -2312,7 +2386,7 @@ const FleetControlPage = ({
             }}
             className="bg-dark-800 text-white-200 border border-dark-600 px-3 py-1.5 rounded-lg text-[13px] font-mono focus:outline-none focus:border-primary-500 transition-colors"
           >
-            <option value="managed">Axiom managed</option>
+            <option value="managed">AX managed</option>
             <option value="all">All instances</option>
             <option value="prefix">By name prefix…</option>
           </select>
@@ -2490,9 +2564,9 @@ const DocsPage = () => {
         <Sec id="quickstart" title="Quick Start">
           <Card className="space-y-4">
             <p className="text-white-300 text-sm leading-relaxed">
-              Axiom Dashboard connects to the{" "}
-              <span className="text-white font-semibold">axiom-bridge</span>{" "}
-              Python server which communicates with your Axiom framework.
+              AX Dashboard connects to the{" "}
+              <span className="text-white font-semibold">ax-bridge</span> Python
+              server which communicates with your AX framework.
             </p>
             {[
               [
@@ -2603,7 +2677,7 @@ const DocsPage = () => {
             <p className="text-white-300 text-sm">
               The Scan Launcher only shows modules whose binary is installed and
               in PATH on the bridge server. If a module doesn’t appear, install
-              the tool in the Axiom image or on the bridge host.
+              the tool in the AX image or on the bridge host.
             </p>
           </Card>
         </Sec>
@@ -2628,7 +2702,7 @@ const DocsPage = () => {
               ],
               [
                 "Fleet",
-                "Axiom-managed instances. Use checkboxes for bulk power-off or terminate (requires confirmation).",
+                "AX-managed instances. Use checkboxes for bulk power-off or terminate (requires confirmation).",
               ],
               ["Settings", "Configure bridge URL and other preferences."],
             ].map(([t, d]) => (
@@ -2697,7 +2771,7 @@ const DocsPage = () => {
                 Instance selection
               </h3>
               <p className="text-white-300 text-sm">
-                Fleet shows Axiom-managed instances from{" "}
+                Fleet shows AX-managed instances from{" "}
                 <C v="~/.axiom/selected.conf" />. Use the filter dropdown for
                 all vs managed. Row checkboxes enable bulk{" "}
                 <span className="text-white font-medium">Power Off</span> /
@@ -2725,7 +2799,7 @@ const DocsPage = () => {
                 </li>
                 <li>• Bulk terminate shows instance count before confirming</li>
                 <li>• Power off is reversible; terminate is permanent</li>
-                <li>• Only Axiom-managed instances shown by default</li>
+                <li>• Only AX-managed instances shown by default</li>
               </ul>
             </Card>
           </div>
@@ -2780,7 +2854,15 @@ const DocsPage = () => {
 
 // ───────────── Main App ─────────────
 
-const App = () => {
+const App = ({
+  onLogout,
+  username,
+  role,
+}: {
+  onLogout?: () => void;
+  username?: string | null;
+  role?: string | null;
+}) => {
   const [selectedTarget, setSelectedTarget] = useState<Target | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2943,10 +3025,12 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-dark-900 text-white-100 font-sans selection:bg-primary-500/30">
-      <Sidebar />
+      <Sidebar role={role} />
       <Header
         unreadCount={unreadCount}
         onBellClick={() => setShowNotifPanel((v) => !v)}
+        onLogout={onLogout}
+        username={username}
       />
       <main className="ml-56 pt-12">
         <div className="p-6 max-w-none">
@@ -2969,9 +3053,26 @@ const App = () => {
               path="/fleet"
               element={<FleetControlPage onNotify={addNotification} />}
             />
+            <Route
+              path="/workflow"
+              element={<WorkflowBuilder apiUrl="http://localhost:5000" />}
+            />
             <Route path="/settings" element={<Settings />} />
             <Route path="/docs" element={<DocsPage />} />
             <Route path="/vulns" element={<VulnsPage targets={targets} />} />
+            <Route path="/profile" element={<UserProfile />} />
+            <Route
+              path="/admin"
+              element={
+                role === null || role === "admin" ? (
+                  <AdminPanel />
+                ) : (
+                  <div className="text-center mt-20 text-white-500 font-mono text-sm">
+                    Access denied.
+                  </div>
+                )
+              }
+            />
             <Route
               path="/targets"
               element={
@@ -3103,6 +3204,38 @@ const DashboardHomeExternal = ({
   const navigate = useNavigate();
   const [fleet, setFleet] = useState<FleetInstance[]>([]);
   const [runningScansCount, setRunningScansCount] = useState(0);
+  const [myTeams, setMyTeams] = useState<ProjectTeam[]>([]);
+  const [teamView, setTeamView] = useState<string>("all");
+
+  // Load teams the current user belongs to
+  useEffect(() => {
+    const loadTeams = async () => {
+      try {
+        const [meRes, teamsRes] = await Promise.all([
+          fetch("http://localhost:5000/api/users/me", {
+            credentials: "include",
+          }),
+          fetch("http://localhost:5000/api/teams", { credentials: "include" }),
+        ]);
+        if (meRes.ok && teamsRes.ok) {
+          const me = await meRes.json();
+          const all: ProjectTeam[] = await teamsRes.json();
+          // Sort newest team first
+          const sorted = all
+            .filter((t) => me.teams?.includes(t.id))
+            .sort(
+              (a, b) =>
+                new Date(b.createdAt).getTime() -
+                new Date(a.createdAt).getTime(),
+            );
+          setMyTeams(sorted);
+        }
+      } catch {
+        // bridge may not support teams yet — keep empty
+      }
+    };
+    loadTeams();
+  }, []);
 
   useEffect(() => {
     const loadFleetData = async () => {
@@ -3141,21 +3274,67 @@ const DashboardHomeExternal = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Enhanced dashboard metrics
-  const metrics = getDashboardMetrics(targets, fleet);
+  // Compute filtered targets based on selected team/user view
+  const filteredTargets = useMemo(() => {
+    if (teamView === "all" || myTeams.length === 0) return targets;
+    if (teamView === "personal") {
+      // Exclude anything that matches any team prefix (direct scans: teamSlug/
+      // or workflow scans: wf-teamSlug-)
+      const slugs = myTeams.map((t) => toTeamSlug(t.name));
+      return targets.filter(
+        (t) =>
+          !slugs.some(
+            (slug) =>
+              t.id?.toLowerCase().startsWith(slug + "/") ||
+              t.programName?.toLowerCase().startsWith(slug + "/") ||
+              t.id?.toLowerCase().startsWith("wf-" + slug + "-") ||
+              t.programName?.toLowerCase().startsWith("wf-" + slug + "-"),
+          ),
+      );
+    }
+    if (teamView.startsWith("team:")) {
+      const teamId = teamView.slice(5);
+      const team = myTeams.find((t) => t.id === teamId);
+      if (!team) return targets;
+      const slug = toTeamSlug(team.name);
+      // Match direct scans (teamSlug/...) and workflow scans (wf-teamSlug-...)
+      return targets.filter(
+        (t) =>
+          t.id?.toLowerCase().startsWith(slug + "/") ||
+          t.programName?.toLowerCase().startsWith(slug + "/") ||
+          t.id?.toLowerCase().startsWith("wf-" + slug + "-") ||
+          t.programName?.toLowerCase().startsWith("wf-" + slug + "-"),
+      );
+    }
+    return targets;
+  }, [targets, teamView, myTeams]);
 
-  // Fleet region data for graph
-  const fleetRegionData = Object.entries(metrics.fleetRegions).map(
-    ([region, count]) => ({ region, count }),
-  );
+  // Enhanced dashboard metrics
+  const metrics = getDashboardMetrics(filteredTargets, fleet);
 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Page header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-sm font-semibold text-white-300 font-mono">
-          Overview
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-sm font-semibold text-white-300 font-mono">
+            Overview
+          </h1>
+          {/* Team / user filter dropdown */}
+          <select
+            value={teamView}
+            onChange={(e) => setTeamView(e.target.value)}
+            className="bg-dark-800 border border-dark-600 rounded-lg px-3 py-1 text-xs text-white-300 font-mono focus:outline-none focus:border-primary-500/60 cursor-pointer"
+          >
+            <option value="all">All</option>
+            <option value="personal">Personal (no team)</option>
+            {myTeams.map((t) => (
+              <option key={t.id} value={`team:${t.id}`}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <button
           onClick={onRefresh}
           disabled={loading}
@@ -3242,10 +3421,11 @@ const DashboardHomeExternal = ({
             Scan Success
           </div>
           <div className="text-xl font-bold text-white tabular-nums mb-2">
-            {targets.length > 0
+            {filteredTargets.length > 0
               ? Math.round(
-                  (targets.filter((t) => t.status === "COMPLETED").length /
-                    targets.length) *
+                  (filteredTargets.filter((t) => t.status === "COMPLETED")
+                    .length /
+                    filteredTargets.length) *
                     100,
                 )
               : 0}
@@ -3255,15 +3435,15 @@ const DashboardHomeExternal = ({
             <div
               className="bg-success-500 h-1 rounded transition-all"
               style={{
-                width: `${targets.length > 0 ? (targets.filter((t) => t.status === "COMPLETED").length / targets.length) * 100 : 0}%`,
+                width: `${filteredTargets.length > 0 ? (filteredTargets.filter((t) => t.status === "COMPLETED").length / filteredTargets.length) * 100 : 0}%`,
               }}
             />
           </div>
         </div>
       </div>
 
-      {/* Middle row: Ports chart + Assets + Fleet Health + Fleet Regions */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      {/* Middle row: Ports chart + Assets + Fleet Health */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Most Common Ports */}
         <div className="bg-dark-800 rounded-lg border border-dark-700 p-4 card-hover">
           <div className="flex items-center justify-between mb-4">
@@ -3278,7 +3458,7 @@ const DashboardHomeExternal = ({
             </button>
           </div>
           {(() => {
-            const commonPorts = getCommonPorts(targets);
+            const commonPorts = getCommonPorts(filteredTargets);
             const top5 = commonPorts.slice(0, 5);
             const maxCount = top5[0]?.count || 1;
             return commonPorts.length === 0 ? (
@@ -3375,16 +3555,18 @@ const DashboardHomeExternal = ({
             </button>
           </div>
           <ul className="max-h-[220px] overflow-y-auto scrollbar-purple">
-            {getTopAssets(targets).length === 0 ? (
+            {getTopAssets(filteredTargets).length === 0 ? (
               <li className="text-white-500 text-[13px] text-center py-8 font-mono">
                 No data yet
               </li>
             ) : (
-              getTopAssets(targets).map((asset, idx) => (
+              getTopAssets(filteredTargets).map((asset, idx) => (
                 <li
                   key={asset.name}
                   onClick={() => {
-                    const t = targets.find((t) => t.domain === asset.name);
+                    const t = filteredTargets.find(
+                      (t) => t.domain === asset.name,
+                    );
                     if (t) navigate(`/targets/${t.id}`);
                     else navigate("/targets");
                   }}
@@ -3476,88 +3658,6 @@ const DashboardHomeExternal = ({
             </div>
           </div>
         </div>
-
-        {/* Fleet Regions — compact pie + stacked legend */}
-        <div className="bg-dark-800 rounded-lg border border-dark-700 p-4 card-hover">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-semibold text-white-300">
-              Fleet Regions
-            </h3>
-            <button
-              onClick={() => navigate("/fleet")}
-              className="text-xs text-white-500 hover:text-white-300 font-mono transition-colors"
-            >
-              Manage →
-            </button>
-          </div>
-          {fleetRegionData.length === 0 ? (
-            <div className="text-white-500 text-xs text-center py-8 font-mono">
-              No fleet data
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              {/* Pie — taller and wider */}
-              <div className="flex pt-5 pl-5">
-                <ResponsiveContainer width={160} height={160}>
-                  <PieChart>
-                    <Pie
-                      data={fleetRegionData}
-                      dataKey="count"
-                      nameKey="region"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={80}
-                      innerRadius={40}
-                      paddingAngle={2}
-                      onClick={() => navigate("/fleet")}
-                      style={{ cursor: "pointer" }}
-                    >
-                      {fleetRegionData.map((entry, index) => (
-                        <Cell
-                          key={`cell-region-${index}`}
-                          fill={pieColors[index % pieColors.length]}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#0f172a",
-                        border: "1px solid #1e293b",
-                        borderRadius: "8px",
-                        padding: "6px 10px",
-                      }}
-                      itemStyle={{ color: "#e2e8f0", fontSize: "11px" }}
-                      formatter={(value, name) => [`${value} nodes`, name]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              {/* Legend alongside */}
-              <div className="flex-1 min-w-0 space-y-1.5 pl-[25%] text-[13px]">
-                {fleetRegionData.slice(0, 7).map((entry, index) => (
-                  <div
-                    key={entry.region}
-                    onClick={() => navigate("/fleet")}
-                    className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity rounded px-1 py-0.5"
-                  >
-                    <span
-                      className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{
-                        backgroundColor: pieColors[index % pieColors.length],
-                      }}
-                    />
-                    <span className="text-[13px] text-white-300 font-mono truncate flex-1">
-                      {entry.region}
-                    </span>
-                    <span className="text-[13px] font-bold text-white font-mono">
-                      {entry.count}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Geo Map */}
@@ -3568,7 +3668,7 @@ const DashboardHomeExternal = ({
           </h3>
         </div>
         <div className="p-4">
-          <GeoMap targets={targets} />
+          <GeoMap targets={targets} onEnriched={onRefresh} />
         </div>
       </div>
 
@@ -3678,10 +3778,102 @@ const DashboardHomeExternal = ({
   );
 };
 
-const AppWrapper = () => (
-  <Router>
-    <App />
-  </Router>
-);
+const API_URL = "http://localhost:5000";
+
+const AppWrapper = () => {
+  const [auth, setAuth] = useState<{
+    checked: boolean;
+    required: boolean;
+    authenticated: boolean;
+    username: string | null;
+    role: string | null;
+  }>({
+    checked: false,
+    required: false,
+    authenticated: false,
+    username: null,
+    role: null,
+  });
+
+  const fetchAuthStatus = async () => {
+    try {
+      const r = await fetch(`${API_URL}/api/auth/status`);
+      if (!r.ok) {
+        setAuth({
+          checked: true,
+          required: false,
+          authenticated: true,
+          username: null,
+          role: null,
+        });
+        return;
+      }
+      const d = await r.json();
+      setAuth({
+        checked: true,
+        required: Boolean(d.authRequired),
+        authenticated: Boolean(d.authenticated),
+        username: d.username || null,
+        role: d.role || null,
+      });
+    } catch {
+      setAuth({
+        checked: true,
+        required: false,
+        authenticated: true,
+        username: null,
+        role: null,
+      });
+    }
+  };
+
+  useEffect(() => {
+    fetchAuthStatus();
+  }, []);
+
+  const handleLoginSuccess = (token: string) => {
+    if (token) localStorage.setItem("ax_auth_token", token);
+    fetchAuthStatus();
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_URL}/api/auth/logout`, { method: "POST" });
+    } catch {}
+    localStorage.removeItem("ax_auth_token");
+    setAuth((a) => ({
+      ...a,
+      authenticated: false,
+      username: null,
+      role: null,
+    }));
+  };
+
+  // Splash while we check auth status
+  if (!auth.checked) {
+    return (
+      <div className="min-h-screen bg-dark-900 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <BinocularsSkullLogo className="w-12 h-12 text-primary-400 animate-pulse" />
+          <span className="text-white-500 text-sm font-mono">loading…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (auth.required && !auth.authenticated) {
+    return <LoginPage apiUrl={API_URL} onSuccess={handleLoginSuccess} />;
+  }
+
+  return (
+    <Router>
+      <App
+        onLogout={auth.required ? handleLogout : undefined}
+        username={auth.username}
+        role={auth.role}
+      />
+    </Router>
+  );
+};
 
 export default AppWrapper;

@@ -310,6 +310,20 @@ Comprehensive fleet management:
 - `GET /api/fleet` - Get fleet status (via axiom-ls)
 - `GET /run-axiom-ls` - Direct axiom-ls execution
 
+**Workflows:**
+
+- `POST /api/workflow/run` - Launch a DAG pipeline (steps + config)
+- `GET /api/workflow/<id>/status` - Run status + per-step state
+- `GET /api/workflow/<id>/log` - Run log
+- `POST /api/workflow/<id>/abort` - Abort a running workflow
+
+**Auth, Users & Teams:**
+
+- `POST /api/auth/login` · `POST /api/auth/logout` · `GET /api/auth/status`
+- `GET /api/users` · `GET /api/users/me` · `POST /api/users` - User management
+- `GET /api/teams` · `POST /api/teams` - Team management
+- `POST /api/invites` · `POST /api/invites/accept` - Team invites
+
 ### 5. **Auto-Import System**
 
 Automated scan result processing:
@@ -367,6 +381,33 @@ imports/
    - Root domain extraction for grouping (api.example.com → example.com)
    - Duplicate subdomain/port/vulnerability filtering
 6. **Persistence**: All data saved to `data/axiom_bridge_store.json`
+
+### 6. **Workflow Builder** (WorkflowBuilder.tsx + workflow-runner.py)
+
+A DAG (directed-acyclic-graph) pipeline editor for chaining scans so the output of each step feeds the next automatically.
+
+- **Step linking**: steps link via parent references — no parent = parallel root, one parent = sequential, multiple parents = fan-in/join.
+- **AMI-aware module picker**: only modules baked into the fleet's provisioner image (barebones / default / reconftw / extras) are selectable; the rest are greyed out with the image that would provide them (shared logic in `services/provisioner.ts`).
+- **Saveable custom templates**: pipelines can be saved as reusable templates in browser `localStorage`, round-tripping the full branch structure; built-in linear playbooks ship alongside them.
+- **Backend sequencer**: `tools/workflow-runner.py` topologically sorts steps, groups them into execution "waves", launches each module through the bridge, waits for real completion, and passes structured output downstream. The UI polls run status for live per-step progress, logs, and abort.
+
+### 8. **MCP Server** (tools/mcp-server.py)
+
+A Model Context Protocol server that lets MCP clients (Claude Desktop, agents, or reporting tools like Ghostwriter) operate the platform as a logged-in account. Thin adapter over the bridge REST API.
+
+- **19 tools**: scans (`start_scan`, `start_full_scan`, `build_workflow`, `list_scans`, `get_scan`, `get_scan_output`, `get_workflow_status`), reporting (`list_vulnerabilities`, `list_targets`, `get_target`), admin (`list_users`, `add_user`, `list_teams`, `create_team`, `add_user_to_team`, `create_invite`), fleet (`list_fleet`, `terminate_fleet`, `whoami`).
+- **Auto-terminate enforced**: every MCP-launched scan/workflow spins up a fresh fleet and tears it down when done.
+- **Transports**: stdio (Claude Desktop) and streamable-HTTP/SSE (remote agents).
+- **Auth**: configured per-account via `GUIAX_TOKEN` or `GUIAX_USERNAME`/`GUIAX_PASSWORD`; all actions attributed to that user.
+
+### 7. **Multi-user, Teams & Invites** (LoginPage.tsx / AdminPanel.tsx / UserProfile.tsx)
+
+- **Auth**: login/logout backed by the bridge; role-based UI (the Admin panel is gated to the `admin` role).
+- **Admin panel**: create users, manage roles, reset passwords.
+- **User profile**: self-service password change.
+- **Teams**: users grouped into project teams; the target view scopes to _all_ / _personal_ / a specific team (direct scans prefixed `teamSlug/…`, workflow scans `wf-teamSlug-…`).
+- **Invites**: admins issue invite codes that new users redeem to join a team.
+- **Single-user fallback**: with no users configured, the dashboard runs open with full admin access, preserving pre-auth behaviour.
 
 ## Usage Examples
 

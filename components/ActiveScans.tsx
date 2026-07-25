@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronUp,
   Target,
+  GitBranch,
 } from "lucide-react";
 import {
   Table,
@@ -60,6 +61,36 @@ interface Scan {
 interface ActiveScansProps {
   apiUrl: string;
   onScanSelected?: (scanId: string) => void;
+}
+
+// Workflow scans launched by WorkflowBuilder are named
+//   wf-<workflowName>-<6-char step id>-<module>
+// Detect that pattern so we can badge them and link the user back to context.
+function parseWfScanName(
+  name?: string,
+): { workflowName: string; stepId: string; moduleName: string } | null {
+  if (!name || !name.startsWith("wf-")) return null;
+  const parts = name.split("-");
+  if (parts.length < 4) return null;
+  const moduleName = parts[parts.length - 1];
+  const stepId = parts[parts.length - 2];
+  const workflowName = parts.slice(1, -2).join("-");
+  if (!workflowName || !stepId || !moduleName) return null;
+  return { workflowName, stepId, moduleName };
+}
+
+function WorkflowBadge({ name }: { name?: string }) {
+  const parsed = parseWfScanName(name);
+  if (!parsed) return null;
+  return (
+    <span
+      title={`Part of workflow "${parsed.workflowName}" — see the Workflow tab → Run / History`}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold font-mono bg-primary-500/15 border border-primary-500/40 text-primary-300"
+    >
+      <GitBranch className="h-2.5 w-2.5" />
+      wf: {parsed.workflowName}
+    </span>
+  );
 }
 
 export default function ActiveScans({
@@ -108,11 +139,16 @@ export default function ActiveScans({
     }
   };
 
+  // Poll automatically: every 8 s while there are running scans, every 30 s otherwise.
+  // This ensures workflow scans that start after the page loads still appear.
+  const hasRunning = scans.some((s) => s.status === "running");
+
   useEffect(() => {
-    // Fetch once on mount; subsequent updates via explicit Refresh button
     fetchScans();
-    return () => {};
-  }, [apiUrl]);
+    const interval = setInterval(fetchScans, hasRunning ? 8_000 : 30_000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiUrl, hasRunning]);
 
   const fetchScans = async () => {
     console.log(
@@ -175,9 +211,27 @@ export default function ActiveScans({
         allScans.length,
       );
 
-      // Remove duplicates by ID, preferring filesystem version (which appears first in array)
+      // Dedup by ID first (filesystem preferred, appears first in array).
+      // Then do a second pass dedup by normalised name: if a scan has a wf-
+      // prefixed name already (filesystem/discover resolved it via prefix match)
+      // and a SCANS_STORE entry with a different ID carries the same name,
+      // keep only one (prefer the entry with the more readable ID / "running"
+      // status so the badge renders correctly).
       const uniqueScansMap = new Map(allScans.map((scan) => [scan.id, scan]));
-      const uniqueScans = Array.from(uniqueScansMap.values());
+      const nameDeduped = new Map<string, (typeof allScans)[0]>();
+      for (const scan of uniqueScansMap.values()) {
+        const key = scan.name || scan.id;
+        const existing = nameDeduped.get(key);
+        if (!existing) {
+          nameDeduped.set(key, scan);
+        } else {
+          // Prefer the entry that is still "running" so it shows in Active section
+          if (existing.status !== "running" && scan.status === "running") {
+            nameDeduped.set(key, scan);
+          }
+        }
+      }
+      const uniqueScans = Array.from(nameDeduped.values());
 
       console.log("[ActiveScans] After deduplication:", uniqueScans.length);
       console.log("[ActiveScans] Running vs Completed:");
@@ -367,8 +421,9 @@ export default function ActiveScans({
                     <div className="flex items-center gap-3">
                       {getStatusIcon(scan.status)}
                       <div>
-                        <div className="font-semibold text-white">
-                          {scan.name}
+                        <div className="font-semibold text-white flex items-center gap-2 flex-wrap">
+                          <span>{scan.name}</span>
+                          <WorkflowBadge name={scan.name} />
                         </div>
                         <div className="text-sm text-slate-400">
                           Module:{" "}
@@ -530,7 +585,10 @@ export default function ActiveScans({
                           </div>
                         </TableCell>
                         <TableCell className="font-medium text-white">
-                          <div>{scan.name}</div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span>{scan.name}</span>
+                            <WorkflowBadge name={scan.name} />
+                          </div>
                           {scan.status === "failed" && scan.failure_reason && (
                             <div
                               className="text-xs text-red-400 font-mono mt-0.5 max-w-xs truncate"

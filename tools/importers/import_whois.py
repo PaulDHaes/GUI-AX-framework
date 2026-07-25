@@ -112,7 +112,8 @@ def parse(filepath, scanner: str, fmt: str, content: str, scan_name: str,
         if cc and cc in COUNTRY_COORDS:
             lat, lng = COUNTRY_COORDS[cc]
             entry["geo"] = {"lat": lat, "lng": lng,
-                            "country": cc, "countryCode": cc}
+                            "country": cc, "countryCode": cc,
+                            "source": "whois"}
         return entry
 
     subdomains_entries: list[tuple[str, dict]] = []

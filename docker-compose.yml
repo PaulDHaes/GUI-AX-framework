@@ -10,16 +10,41 @@ services:
     build:
       context: .
     container_name: gui-ax-dashboard
-    platform: linux/amd64
+    # No platform pin: build/run natively for the host arch (arm64 on Apple
+    # Silicon). Pinning linux/amd64 forced QEMU emulation, under which the
+    # bundled AWS CLI busy-loops on every network call and wedges axiom.
     ports:
-      - "3000:3000" # Vite UI
+      - "3000:3000" # Vite UI (host 3001 — 3000 is taken by another container)
       - "5000:5000" # Flask bridge API
+      - "8787:8787" # MCP server (started from Settings → MCP Server; streamable-HTTP)
     volumes:
-      # ── Persistent data only (target store survives container restarts) ──
+      # ── Persistent data (survives restarts) ──────────────────────────────
       - gui-ax-data:/app/data
     environment:
       - PORT=5000
       - HOST=0.0.0.0
+      # Cuts AWS SDK retries so a down region fails fast instead of the
+      # default 3 attempts (each with its own connect/read timeout).
+      - AWS_MAX_ATTEMPTS=1
+      - AWS_RETRY_MODE=standard
+      # Region names (space-separated) that tools/setup-aws-region-filter.sh's
+      # `aws` wrapper strips out of `aws ec2 describe-regions` — keeps axiom's
+      # "loop over every region" commands from ever reaching a blocked region.
+      # The IAM user has an explicit-deny policy (Block-EC2-MiddleEast) on all
+      # Middle-East regions, so every ec2:DescribeInstances against one throws
+      # "UnauthorizedOperation". List ALL ME regions here (not just me-south-1)
+      # so none is ever queried. Requires running that script once inside the
+      # container; see its header.
+      - AXIOM_EXCLUDED_REGIONS=me-south-1 me-central-1 il-central-1
+      # ── Authentication ────────────────────────────────────────────────────
+      # Secrets are read from a local, git-ignored .env file (see .env.example).
+      # Copy .env.example to .env and fill in real values — never commit them.
+      # Set GUI_AX_PASSWORD to enable the login gate; leave empty to run open.
+      - GUI_AX_PASSWORD=${GUI_AX_PASSWORD:-}
+      - GUI_AX_USERNAME=${GUI_AX_USERNAME:-admin}
+      # Optional: a static token so existing sessions survive bridge restarts.
+      # Generate one with: python3 -c "import secrets; print(secrets.token_hex(32))"
+      - GUI_AX_STATIC_TOKEN=${GUI_AX_STATIC_TOKEN:-}
       # Uncomment and set your Gemini key to enable the AI panel:
       # - GEMINI_API_KEY=your_key_here
     stdin_open: true # Required for interactive axiom-configure

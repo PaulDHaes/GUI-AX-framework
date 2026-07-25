@@ -26,6 +26,7 @@ export interface GeoLocation {
   city?: string;
   country?: string;
   countryCode?: string;
+  source?: "whois" | "ip"; // whois = country centroid, ip = MaxMind city-level
 }
 
 export interface Subdomain {
@@ -87,4 +88,41 @@ export interface DashboardStats {
   criticalVulns: number;
   runningScans: number;
   fleetStatus: number;
+}
+
+// ── User management ──────────────────────────────────────────────────────────
+
+export type UserRole = "admin" | "user";
+
+export interface AppUser {
+  id: string;
+  username: string;
+  email?: string;
+  role: UserRole;
+  teams: string[]; // team IDs
+  createdAt: string;
+  lastLogin?: string;
+  active: boolean;
+}
+
+export interface ProjectTeam {
+  id: string;
+  name: string;
+  description?: string;
+  targetIds: string[];
+  memberIds: string[];
+  createdAt: string;
+}
+
+export interface InviteLink {
+  id: string;
+  token: string;
+  teamId: string;
+  teamName: string;
+  createdBy: string;
+  expiresAt: string;
+  usedBy?: string;
+  usedAt?: string;
+  maxUses: number;
+  useCount: number;
 }

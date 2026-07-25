@@ -72,6 +72,23 @@ cp /root/.zshrc /root/.bashrc
 # Fix bash read syntax (zsh uses read "var?prompt", bash uses read -p)
 sed -i 's/read "answer?  Run/read -p "  Run/' /root/.bashrc
 
+# ── AWS CLI hardening for degraded/unreachable regions ──
+# Bound per-call socket timeouts so a region that's down (e.g. me-south-1)
+# fails in seconds instead of hanging axiom's per-region loops. These keys have
+# no env-var equivalent — they only exist in ~/.aws/config — and axiom's own
+# `aws configure set default.region ...` merges alongside them without removing
+# them. Non-fatal: a fresh container may not have ~/.aws yet.
+aws configure set cli_connect_timeout 5 2>/dev/null || true
+aws configure set cli_read_timeout 15 2>/dev/null || true
+
+# Install the region-filter wrapper so axiom's "loop over every region" commands
+# skip anything listed in $AXIOM_EXCLUDED_REGIONS (set in docker-compose.yml)
+# entirely — it never even issues an API call to a known-down region. Idempotent
+# and non-fatal so it can never block startup.
+if [[ -f "$APP_DIR/tools/setup-aws-region-filter.sh" ]]; then
+    bash "$APP_DIR/tools/setup-aws-region-filter.sh" || true
+fi
+
 # ── Start the dashboard in a tmux session (bridge + Vite) ──
 tmux kill-session -t dashboard 2>/dev/null || true
 
