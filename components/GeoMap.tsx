@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import * as d3 from "d3";
 import * as topojson from "topojson-client";
+// Bundled locally (not fetched from a CDN) so the map renders with no outbound network access
+import worldTopology from "world-atlas/countries-110m.json";
 import { Target } from "../types";
 import { getOnlineGeoEnabled } from "../services/prefs";
 
@@ -18,7 +20,7 @@ const GeoMap: React.FC<GeoMapProps> = ({
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [worldData, setWorldData] = useState<any>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
 
   // IP-geolocation provider availability + enrichment state
   const [offlineAvailable, setOfflineAvailable] = useState<boolean>(false);
@@ -38,11 +40,7 @@ const GeoMap: React.FC<GeoMapProps> = ({
           const src = s.geo.source || "whois";
           srcCounts[src as "whois" | "ip"] =
             (srcCounts[src as "whois" | "ip"] || 0) + 1;
-          const key = [
-            src,
-            s.geo.country || "",
-            s.geo.city || "",
-          ].join("|");
+          const key = [src, s.geo.country || "", s.geo.city || ""].join("|");
           if (!geoAgg[key]) {
             geoAgg[key] = {
               ...s.geo,
@@ -77,7 +75,9 @@ const GeoMap: React.FC<GeoMapProps> = ({
         setOfflineAvailable(Boolean(d.offlineAvailable ?? d.available));
         // Online provider is offered only if the bridge allows it AND the user
         // hasn't disabled it in Settings (privacy opt-out).
-        setOnlineAvailable(d.onlineAvailable !== false && getOnlineGeoEnabled());
+        setOnlineAvailable(
+          d.onlineAvailable !== false && getOnlineGeoEnabled(),
+        );
       })
       .catch(() => {
         setOfflineAvailable(false);
@@ -112,26 +112,60 @@ const GeoMap: React.FC<GeoMapProps> = ({
     }
   };
 
+  // Track container size so the map always has something to draw into, even before
+  // layout has settled on first mount, and redraws on window/panel resize.
   useEffect(() => {
-    // Fetch world topology
-    fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
-      .then((response) => response.json())
-      .then((data) => setWorldData(data))
-      .catch((err) => console.error("Failed to load map data", err));
+    if (!containerRef.current) return;
+    const el = containerRef.current;
+    const update = () => setContainerWidth(el.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
-    if (!svgRef.current || !worldData || !containerRef.current) return;
+    if (!svgRef.current || !containerRef.current) return;
 
-    const width = containerRef.current.clientWidth;
-    const height = 450;
+    const width = containerWidth || containerRef.current.clientWidth || 600;
+    const height = 480;
 
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
+    svg.attr("viewBox", `0 0 ${width} ${height}`);
+
+    // Ocean: radial gradient instead of a flat fill, plus a soft glow filter for the dots
+    const defs = svg.append("defs");
+    const ocean = defs
+      .append("radialGradient")
+      .attr("id", "ocean-gradient")
+      .attr("cx", "50%")
+      .attr("cy", "38%")
+      .attr("r", "75%");
+    ocean.append("stop").attr("offset", "0%").attr("stop-color", "#16213b");
+    ocean.append("stop").attr("offset", "100%").attr("stop-color", "#0a0f1e");
+
+    const glow = defs
+      .append("filter")
+      .attr("id", "geo-dot-glow")
+      .attr("x", "-100%")
+      .attr("y", "-100%")
+      .attr("width", "300%")
+      .attr("height", "300%");
+    glow
+      .append("feGaussianBlur")
+      .attr("stdDeviation", "3")
+      .attr("result", "blur");
+    const glowMerge = glow.append("feMerge");
+    glowMerge.append("feMergeNode").attr("in", "blur");
+    glowMerge.append("feMergeNode").attr("in", "SourceGraphic");
+
     svg
-      .attr("viewBox", `0 0 ${width} ${height}`)
-      .style("background-color", "#0f172a");
+      .append("rect")
+      .attr("width", width)
+      .attr("height", height)
+      .attr("fill", "url(#ocean-gradient)");
 
     const projection = d3
       .geoMercator()
@@ -141,12 +175,26 @@ const GeoMap: React.FC<GeoMapProps> = ({
     const path = d3.geoPath().projection(projection);
     const g = svg.append("g");
 
-    // Draw countries
-    const countries = topojson.feature(worldData, worldData.objects.countries);
-    g.selectAll("path")
+    // Faint lat/long graticule for a techy "satellite overlay" feel
+    const graticule = d3.geoGraticule();
+    g.append("path")
+      .datum(graticule())
+      .attr("d", path as any)
+      .attr("fill", "none")
+      .attr("stroke", "#1e293b")
+      .attr("stroke-width", 0.4)
+      .attr("stroke-dasharray", "1,2.5");
+
+    // Draw countries — topology is bundled locally, so this is always available
+    const countries = topojson.feature(
+      worldTopology as any,
+      (worldTopology as any).objects.countries,
+    );
+    g.selectAll("path.country")
       .data((countries as any).features)
       .enter()
       .append("path")
+      .attr("class", "country")
       .attr("d", path as any)
       .attr("fill", "#1e293b")
       .attr("stroke", "#334155")
@@ -163,19 +211,35 @@ const GeoMap: React.FC<GeoMapProps> = ({
     // Base visual radius in screen-space pixels (before zoom)
     const baseR = (d: any) => Math.min(16, 4 + Math.sqrt(d.count) * 2);
 
-    // Draw dots — IP-located dots get a cyan ring, WHOIS a white ring
-    const circles = g
-      .selectAll("circle")
+    // Radar-style pulsing ring behind each dot
+    g.selectAll("circle.geo-pulse-ring")
       .data(locations)
       .enter()
       .append("circle")
+      .attr("class", "geo-pulse-ring")
+      .attr("cx", (d: any) => projection([d.lng, d.lat])?.[0] ?? 0)
+      .attr("cy", (d: any) => projection([d.lng, d.lat])?.[1] ?? 0)
+      .attr("r", (d: any) => baseR(d))
+      .attr("fill", "none")
+      .attr("stroke", (d: any) => colorScale(d.count))
+      .attr("stroke-width", 1.5)
+      .style("animation-delay", () => `${Math.random() * 2.4}s`);
+
+    // Draw dots — IP-located dots get a cyan ring, WHOIS a white ring
+    const circles = g
+      .selectAll("circle.geo-dot")
+      .data(locations)
+      .enter()
+      .append("circle")
+      .attr("class", "geo-dot")
       .attr("cx", (d: any) => projection([d.lng, d.lat])?.[0] ?? 0)
       .attr("cy", (d: any) => projection([d.lng, d.lat])?.[1] ?? 0)
       .attr("r", (d: any) => baseR(d))
       .attr("fill", (d: any) => colorScale(d.count))
-      .attr("fill-opacity", 0.85)
+      .attr("fill-opacity", 0.9)
       .attr("stroke", (d: any) => (d.source === "ip" ? "#22d3ee" : "#fff"))
       .attr("stroke-width", 1)
+      .attr("filter", "url(#geo-dot-glow)")
       .style("cursor", "pointer");
 
     circles
@@ -194,26 +258,29 @@ const GeoMap: React.FC<GeoMapProps> = ({
       .on("zoom", (event) => {
         g.attr("transform", event.transform);
         const k = event.transform.k;
-        g.selectAll<SVGCircleElement, any>("circle")
+        g.selectAll<SVGCircleElement, any>("circle.geo-dot")
           .attr("r", (d) => baseR(d) / k)
           .attr("stroke-width", 1 / k);
+        g.selectAll<SVGCircleElement, any>("circle.geo-pulse-ring")
+          .attr("r", (d) => baseR(d) / k)
+          .attr("stroke-width", 1.5 / k);
       });
 
     svg.call(zoom as any);
-  }, [worldData, locations]);
+  }, [locations, containerWidth]);
 
   return (
     <div
       ref={containerRef}
-      className="w-full relative rounded-lg overflow-hidden border border-dark-700 bg-dark-800"
+      className="w-full relative rounded-lg overflow-hidden border border-cyan-500/20 bg-card map-ambient-glow"
     >
-      <div className="absolute top-4 left-4 z-10 bg-dark-900/90 px-3 py-1 rounded border border-dark-700 text-xs font-mono text-dark-300">
+      <div className="absolute top-4 left-4 z-10 bg-background/90 px-3 py-1 rounded border border-border text-xs font-mono text-muted-foreground">
         ASSET GEOLOCATION
       </div>
 
       {/* Source summary + enrich control */}
       <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
-        <div className="bg-dark-900/70 px-2.5 py-1 rounded border border-dark-700/60 text-[13px] font-mono text-dark-400 flex items-center gap-3">
+        <div className="bg-background/70 px-2.5 py-1 rounded border border-border/60 text-[13px] font-mono text-muted-foreground flex items-center gap-3">
           <span className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
             WHOIS {sourceCounts.whois}
@@ -228,7 +295,7 @@ const GeoMap: React.FC<GeoMapProps> = ({
             onClick={() => runEnrich("offline")}
             disabled={enriching !== null}
             title="Resolve hosts and geolocate their IPs offline (MaxMind GeoLite2) — no IPs leave your machine"
-            className="bg-cyan-600/80 hover:bg-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-mono px-3 py-1.5 rounded border border-cyan-500/60 transition-colors"
+            className="bg-cyan-600/80 hover:bg-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed text-foreground text-xs font-mono px-3 py-1.5 rounded border border-cyan-500/60 transition-colors"
           >
             {enriching === "offline" ? "Locating…" : "Locate by IP"}
           </button>
@@ -240,8 +307,8 @@ const GeoMap: React.FC<GeoMapProps> = ({
             title="Geolocate host IPs via ip-api.com — no signup, but your target IPs are sent to a third-party service"
             className={
               (offlineAvailable
-                ? "bg-dark-800/80 hover:bg-dark-700 border-dark-600 text-dark-200"
-                : "bg-cyan-600/80 hover:bg-cyan-600 border-cyan-500/60 text-white") +
+                ? "bg-card/80 hover:bg-secondary border-border text-muted-foreground"
+                : "bg-cyan-600/80 hover:bg-cyan-600 border-cyan-500/60 text-foreground") +
               " disabled:opacity-50 disabled:cursor-not-allowed text-xs font-mono px-3 py-1.5 rounded border transition-colors"
             }
           >
@@ -255,15 +322,15 @@ const GeoMap: React.FC<GeoMapProps> = ({
       </div>
 
       {enrichMsg && (
-        <div className="absolute top-14 right-4 z-10 bg-dark-900/90 px-3 py-1.5 rounded border border-dark-700 text-[13px] font-mono text-cyan-300 max-w-xs">
+        <div className="absolute top-14 right-4 z-10 bg-background/90 px-3 py-1.5 rounded border border-border text-[13px] font-mono text-cyan-300 max-w-xs">
           {enrichMsg}
         </div>
       )}
 
       {locations.length === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
-          <p className="text-dark-500 text-sm font-mono">No geo data yet</p>
-          <p className="text-dark-600 text-xs mt-1 text-center px-6">
+          <p className="text-muted-foreground text-sm font-mono">No geo data yet</p>
+          <p className="text-muted-foreground text-xs mt-1 text-center px-6">
             Import WHOIS output for country-level dots, or{" "}
             {offlineAvailable
               ? 'click "Locate by IP" to geolocate resolved hosts offline'
@@ -273,8 +340,8 @@ const GeoMap: React.FC<GeoMapProps> = ({
       )}
 
       {/* Map Legend */}
-      <div className="absolute bottom-4 right-4 z-10 bg-dark-900/90 px-3 py-2.5 rounded-lg border border-dark-700 text-xs font-mono select-none">
-        <div className="text-dark-500 uppercase tracking-wider text-[13px] mb-2 font-semibold">
+      <div className="absolute bottom-4 right-4 z-10 bg-background/90 px-3 py-2.5 rounded-lg border border-border text-xs font-mono select-none">
+        <div className="text-muted-foreground uppercase tracking-wider text-[13px] mb-2 font-semibold">
           Legend
         </div>
         <div className="flex items-center gap-2 mb-1.5">
@@ -289,7 +356,7 @@ const GeoMap: React.FC<GeoMapProps> = ({
               strokeWidth="1"
             />
           </svg>
-          <span className="text-dark-300">1 asset</span>
+          <span className="text-muted-foreground">1 asset</span>
         </div>
         <div className="flex items-center gap-2 mb-2">
           <svg width="18" height="18" viewBox="0 0 18 18">
@@ -303,7 +370,7 @@ const GeoMap: React.FC<GeoMapProps> = ({
               strokeWidth="1"
             />
           </svg>
-          <span className="text-dark-300">Multiple assets</span>
+          <span className="text-muted-foreground">Multiple assets</span>
         </div>
         <div className="flex items-center gap-2 mb-2">
           <svg width="12" height="12" viewBox="0 0 12 12">
@@ -317,13 +384,13 @@ const GeoMap: React.FC<GeoMapProps> = ({
               strokeWidth="1.5"
             />
           </svg>
-          <span className="text-dark-300">IP-located (cyan ring)</span>
+          <span className="text-muted-foreground">IP-located (cyan ring)</span>
         </div>
-        <div className="text-dark-600 text-[13px]">
+        <div className="text-muted-foreground text-[13px]">
           Scroll to zoom · Drag to pan
         </div>
       </div>
-      <svg ref={svgRef} className="w-full h-[450px] block"></svg>
+      <svg ref={svgRef} className="w-full h-[480px] block"></svg>
     </div>
   );
 };

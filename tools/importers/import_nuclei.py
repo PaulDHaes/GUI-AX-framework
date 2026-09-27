@@ -85,7 +85,7 @@ def parse(filepath, scanner: str, fmt: str, content: str, scan_name: str,
                 target = {
                     "id":              f"{scan_name}-{root_domain}",
                     "domain":          root_domain,
-                    "programName":     scanner,
+                    "programName":     scan_name or scanner,
                     "status":          "COMPLETED",
                     "lastScanDate":    datetime.now(timezone.utc).isoformat(),
                     "sources":         [scan_name],
@@ -157,7 +157,7 @@ def parse(filepath, scanner: str, fmt: str, content: str, scan_name: str,
                 target = {
                     "id":              f"{scan_name}-{root_domain}",
                     "domain":          root_domain,
-                    "programName":     scanner,
+                    "programName":     scan_name or scanner,
                     "status":          "COMPLETED",
                     "lastScanDate":    datetime.now(timezone.utc).isoformat(),
                     "sources":         [scan_name],
@@ -172,9 +172,12 @@ def parse(filepath, scanner: str, fmt: str, content: str, scan_name: str,
             elif scan_name not in target.get("sources", []):
                 target.setdefault("sources", []).append(scan_name)
 
+            # Keep CVE-style template ids intact (e.g. "CVE-2021-44228") — title-casing
+            # them strips the dashes/case the frontend's CVE regex relies on.
+            is_cve_id = re.match(r'^CVE-\d{4}-\d+$', template_id, re.IGNORECASE)
             vuln_info = {
                 "id":          template_id,
-                "name":        template_id.replace("-", " ").title(),
+                "name":        template_id.upper() if is_cve_id else template_id.replace("-", " ").title(),
                 "description": "",
                 "severity":    severity,
                 "path":        url,
@@ -306,7 +309,7 @@ def process_nuclei_md_files(md_files, scan_name: str) -> tuple[int, int]:
             target = {
                 "id":              f"{scan_name}-{root_domain}",
                 "domain":          root_domain,
-                "programName":     "nuclei",
+                "programName":     scan_name or "nuclei",
                 "status":          "COMPLETED",
                 "lastScanDate":    datetime.now(timezone.utc).isoformat(),
                 "sources":         [scan_name],

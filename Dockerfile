@@ -90,6 +90,30 @@ RUN git clone https://github.com/attacksurge/ax/ /root/.axiom/
 # ── Add Ax to PATH ──
 ENV PATH="/root/.axiom/interact:${PATH}"
 
+# ── Install SearchSploit (Exploit-DB offline search) ──
+#    Official manual-install method (no offsec apt repo needed on Ubuntu).
+#    Purely local/offline — queries the bundled exploitdb database, no cloud
+#    fleet required. Used by the bridge's /api/searchsploit endpoint AND
+#    registered as an ax scan module (tools/axiom-modules/searchsploit.json)
+#    for use against remote fleet instances via Scan Launcher.
+RUN git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb \
+    && ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit \
+    && cp -n /opt/exploitdb/.searchsploit_rc /root/.searchsploit_rc || true
+
+# ── Install Metasploit Framework (nightly installer) ──
+#    Registered as an ax scan module (tools/axiom-modules/metasploit.json).
+#    NOTE: for the module to run against a remote fleet, msfconsole must also
+#    be present on your ax Packer/fleet base image — this only installs it
+#    in this dashboard container (useful for local/one-shot use).
+RUN curl -fsSL https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb -o /tmp/msfinstall \
+    && chmod 755 /tmp/msfinstall \
+    && /tmp/msfinstall \
+    && rm -f /tmp/msfinstall
+
+# ── Register the extra ax scan modules (searchsploit, metasploit) ──
+COPY tools/axiom-modules/searchsploit.json /root/.axiom/modules/searchsploit.json
+COPY tools/axiom-modules/metasploit.json /root/.axiom/modules/metasploit.json
+
 # ── Dashboard setup ──
 WORKDIR /app
 

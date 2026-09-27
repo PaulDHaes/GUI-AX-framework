@@ -291,7 +291,10 @@ def parse_jpeg_folder(folder_path, scan_name: str, targets: list, display_name: 
 
     rows_data: list[dict] = []
     for jf in jpeg_files:
-        stem = jf.stem  # e.g. "https---apple.com-443"
+        stem = jf.stem  # e.g. "https---apple.com-443" or "https:__apple.com"
+        scheme, host, port = None, None, None
+
+        # Old gowitness format: https---hostname-port
         m = re.match(r"^(https?)---(.+?)-(\d+)$", stem)
         if m:
             scheme, host, port = m.group(1), m.group(2), int(m.group(3))
@@ -301,9 +304,15 @@ def parse_jpeg_folder(folder_path, scan_name: str, targets: list, display_name: 
                 scheme, host = m2.group(1), m2.group(2)
                 port = 443 if scheme == "https" else 80
             else:
-                # Unknown format — just copy the file and skip
-                shutil.copy2(str(jf), str(bundle_dest / jf.name))
-                continue
+                # New gowitness format: https:__hostname or http:__hostname
+                m3 = re.match(r"^(https?)[:_]{1,2}[_]{1,2}(.+)$", stem, re.I)
+                if m3:
+                    scheme, host = m3.group(1).lower(), m3.group(2)
+                    port = 443 if scheme == "https" else 80
+                else:
+                    # Unknown format — just copy the file and skip
+                    shutil.copy2(str(jf), str(bundle_dest / jf.name))
+                    continue
 
         dest_fname = jf.name
         shutil.copy2(str(jf), str(bundle_dest / dest_fname))

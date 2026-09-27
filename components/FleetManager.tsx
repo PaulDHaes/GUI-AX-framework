@@ -122,7 +122,7 @@ const FleetManager = () => {
       {/* Header with Quick Actions */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <Server className="text-primary-500" />
             Fleet Management
           </h1>
@@ -136,7 +136,7 @@ const FleetManager = () => {
             <select
               value={filterMode}
               onChange={(e) => setFilterMode(e.target.value)}
-              className="appearance-none bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 px-3 py-2 pr-8 rounded-lg text-sm transition-colors cursor-pointer"
+              className="appearance-none bg-slate-800 hover:bg-slate-700 text-foreground border border-slate-600 px-3 py-2 pr-8 rounded-lg text-sm transition-colors cursor-pointer"
             >
               <option value="managed">AX Managed</option>
               <option value="all">All Instances</option>
@@ -145,11 +145,11 @@ const FleetManager = () => {
           </div>
           <button
             onClick={loadData}
-            className="bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 px-3 py-2 rounded-lg flex items-center gap-2 text-sm transition-colors"
+            className="bg-slate-800 hover:bg-slate-700 text-foreground border border-slate-600 px-3 py-2 rounded-lg flex items-center gap-2 text-sm transition-colors"
           >
             <RefreshCw className="w-4 h-4" /> Sync
           </button>
-          <button className="bg-primary-600 hover:bg-primary-500 text-white px-3 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors shadow-lg shadow-primary-900/20">
+          <button className="bg-primary-600 hover:bg-primary-500 text-foreground px-3 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors shadow-lg shadow-primary-900/20">
             <Plus className="w-4 h-4" /> Spin Up Fleet
           </button>
         </div>
@@ -161,7 +161,7 @@ const FleetManager = () => {
           <p className="text-slate-500 text-xs font-mono mb-1">
             Total Instances
           </p>
-          <p className="text-xl font-bold text-white">{instances.length}</p>
+          <p className="text-xl font-bold text-foreground">{instances.length}</p>
         </div>
         <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
           <p className="text-slate-500 text-xs font-mono mb-1">
@@ -190,27 +190,27 @@ const FleetManager = () => {
               <Check className="w-4 h-4 text-primary-400" />
             </div>
             <span className="font-medium">
-              <span className="font-bold text-white">{selectedIds.size}</span>{" "}
+              <span className="font-bold text-foreground">{selectedIds.size}</span>{" "}
               instances selected
             </span>
           </div>
           <div className="flex gap-3">
             <button
               onClick={() => handleBulkAction("restart")}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded border border-slate-600 flex items-center gap-2 transition-colors"
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-foreground text-xs font-medium rounded border border-slate-600 flex items-center gap-2 transition-colors"
             >
               <RefreshCw className="w-3 h-3" /> Restart Selected
             </button>
             <button
               onClick={() => handleBulkAction("tag")}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded border border-slate-600 flex items-center gap-2 transition-colors"
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-foreground text-xs font-medium rounded border border-slate-600 flex items-center gap-2 transition-colors"
             >
               <Tag className="w-3 h-3" /> Tag Selected
             </button>
             <div className="w-px bg-primary-500/30 mx-1"></div>
             <button
               onClick={() => handleBulkAction("terminate")}
-              className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-white-400 text-xs font-medium rounded border border-red-500/30 flex items-center gap-2 transition-colors"
+              className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-muted-foreground text-xs font-medium rounded border border-red-500/30 flex items-center gap-2 transition-colors"
             >
               <Trash2 className="w-3 h-3" /> Terminate Selected
             </button>
@@ -221,7 +221,7 @@ const FleetManager = () => {
       {/* Instance List */}
       <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
         <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
-          <h3 className="text-sm font-semibold text-white uppercase tracking-wider">
+          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">
             Instance Inventory
           </h3>
           <div className="flex gap-2 text-xs">
@@ -292,7 +292,7 @@ const FleetManager = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="font-medium text-white flex items-center gap-2">
+                      <div className="font-medium text-foreground flex items-center gap-2">
                         <Terminal
                           className={`w-4 h-4 ${
                             isSelected ? "text-primary-400" : "text-slate-500"
@@ -328,7 +328,7 @@ const FleetManager = () => {
                             {/* Arrow */}
                             <div className="w-2 h-2 bg-slate-900 border-l border-b border-slate-600 rotate-45 absolute -left-1 top-1/2 -translate-y-1/2"></div>
 
-                            <div className="font-semibold text-white text-xs mb-2 border-b border-slate-800 pb-1 flex justify-between">
+                            <div className="font-semibold text-foreground text-xs mb-2 border-b border-slate-800 pb-1 flex justify-between">
                               <span>{instance.instanceType}</span>
                               <span className="text-slate-500 font-normal">
                                 {instance.provider}
@@ -377,7 +377,7 @@ const FleetManager = () => {
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
                         <button
-                          className="p-1.5 hover:bg-slate-700 rounded text-slate-400 hover:text-white"
+                          className="p-1.5 hover:bg-slate-700 rounded text-slate-400 hover:text-foreground"
                           title="SSH"
                         >
                           <Terminal className="w-4 h-4" />

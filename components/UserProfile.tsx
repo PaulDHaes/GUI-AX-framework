@@ -30,8 +30,8 @@ const Section = ({
   title: string;
   children: React.ReactNode;
 }) => (
-  <div className="bg-dark-800 border border-dark-700 rounded-xl p-5 space-y-4">
-    <h2 className="text-sm font-semibold text-white-300 font-mono uppercase tracking-wider">
+  <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+    <h2 className="text-sm font-semibold text-foreground/80 font-mono uppercase tracking-wider">
       {title}
     </h2>
     {children}
@@ -216,7 +216,7 @@ const UserProfile = () => {
 
   if (loadingData) {
     return (
-      <div className="flex items-center justify-center py-32 text-white-500 text-sm font-mono">
+      <div className="flex items-center justify-center py-32 text-muted-foreground text-sm font-mono">
         <RefreshCw className="w-4 h-4 animate-spin mr-2" />
         Loading profile…
       </div>
@@ -231,10 +231,10 @@ const UserProfile = () => {
           <User className="w-5 h-5 text-primary-400" />
         </div>
         <div>
-          <h1 className="text-lg font-bold text-white font-mono">
+          <h1 className="text-lg font-bold text-foreground font-mono">
             {me?.username ?? "Profile"}
           </h1>
-          <p className="text-xs text-white-500 font-mono">
+          <p className="text-xs text-muted-foreground font-mono">
             {me?.role === "admin" ? (
               <span className="text-yellow-400">admin</span>
             ) : (
@@ -249,11 +249,11 @@ const UserProfile = () => {
       <Section title="Change Password">
         <form onSubmit={handleChangePassword} className="space-y-3">
           <div>
-            <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+            <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
               Current Password
             </label>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white-600" />
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/80" />
               <input
                 type="password"
                 value={currentPw}
@@ -261,17 +261,17 @@ const UserProfile = () => {
                 placeholder="••••••••"
                 required
                 autoComplete="current-password"
-                className="w-full bg-dark-900 border border-dark-600 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono transition-colors"
+                className="w-full bg-background border border-border rounded-lg pl-9 pr-3 py-2.5 text-sm text-foreground placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono transition-colors"
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+              <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
                 New Password
               </label>
               <div className="relative">
-                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white-600" />
+                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/80" />
                 <input
                   type="password"
                   value={newPw}
@@ -280,16 +280,16 @@ const UserProfile = () => {
                   required
                   minLength={8}
                   autoComplete="new-password"
-                  className="w-full bg-dark-900 border border-dark-600 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono transition-colors"
+                  className="w-full bg-background border border-border rounded-lg pl-9 pr-3 py-2.5 text-sm text-foreground placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono transition-colors"
                 />
               </div>
             </div>
             <div>
-              <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+              <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
                 Confirm New Password
               </label>
               <div className="relative">
-                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white-600" />
+                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/80" />
                 <input
                   type="password"
                   value={confirmPw}
@@ -297,7 +297,7 @@ const UserProfile = () => {
                   placeholder="repeat password"
                   required
                   autoComplete="new-password"
-                  className="w-full bg-dark-900 border border-dark-600 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono transition-colors"
+                  className="w-full bg-background border border-border rounded-lg pl-9 pr-3 py-2.5 text-sm text-foreground placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono transition-colors"
                 />
               </div>
             </div>
@@ -308,7 +308,7 @@ const UserProfile = () => {
           <button
             type="submit"
             disabled={savingPw}
-            className="flex items-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors font-mono"
+            className="flex items-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-foreground px-4 py-2 rounded-lg text-sm font-semibold transition-colors font-mono"
           >
             {savingPw ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -323,7 +323,7 @@ const UserProfile = () => {
       {/* My Teams */}
       <Section title="My Project Teams">
         {myTeams.length === 0 ? (
-          <p className="text-white-500 text-sm font-mono">
+          <p className="text-muted-foreground text-sm font-mono">
             You are not assigned to any project teams yet. Use an invite link
             below to join one.
           </p>
@@ -332,22 +332,22 @@ const UserProfile = () => {
             {myTeams.map((team) => (
               <div
                 key={team.id}
-                className="flex items-center justify-between bg-dark-900 border border-dark-700 rounded-lg px-4 py-3"
+                className="flex items-center justify-between bg-background border border-border rounded-lg px-4 py-3"
               >
                 <div className="flex items-center gap-3">
                   <Users className="w-4 h-4 text-primary-400 flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold text-white font-mono">
+                    <p className="text-sm font-semibold text-foreground font-mono">
                       {team.name}
                     </p>
                     {team.description && (
-                      <p className="text-xs text-white-500 font-mono mt-0.5">
+                      <p className="text-xs text-muted-foreground font-mono mt-0.5">
                         {team.description}
                       </p>
                     )}
                   </div>
                 </div>
-                <span className="text-xs text-white-600 font-mono">
+                <span className="text-xs text-muted-foreground/80 font-mono">
                   {team.memberIds?.length ?? 0} member
                   {team.memberIds?.length !== 1 ? "s" : ""}
                 </span>
@@ -360,25 +360,25 @@ const UserProfile = () => {
       {/* Accept Invite */}
       <Section title="Join a Team via Invite Link">
         <form onSubmit={handleAcceptInvite} className="space-y-3">
-          <p className="text-xs text-white-500 font-mono">
+          <p className="text-xs text-muted-foreground font-mono">
             Paste an invite token or URL you received from an admin to join a
             project team.
           </p>
           <div className="flex gap-2">
             <div className="relative flex-1">
-              <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white-600" />
+              <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/80" />
               <input
                 type="text"
                 value={inviteToken}
                 onChange={(e) => setInviteToken(e.target.value)}
                 placeholder="Invite token or URL"
-                className="w-full bg-dark-900 border border-dark-600 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono transition-colors"
+                className="w-full bg-background border border-border rounded-lg pl-9 pr-3 py-2.5 text-sm text-foreground placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono transition-colors"
               />
             </div>
             <button
               type="submit"
               disabled={accepting || !inviteToken.trim()}
-              className="flex items-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors font-mono whitespace-nowrap"
+              className="flex items-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-foreground px-4 py-2 rounded-lg text-sm font-semibold transition-colors font-mono whitespace-nowrap"
             >
               {accepting ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -407,13 +407,13 @@ const UserProfile = () => {
               return (
                 <div
                   key={inv.id}
-                  className="flex items-center justify-between bg-dark-900 border border-dark-700 rounded-lg px-4 py-3"
+                  className="flex items-center justify-between bg-background border border-border rounded-lg px-4 py-3"
                 >
                   <div>
-                    <p className="text-sm font-semibold text-white font-mono">
+                    <p className="text-sm font-semibold text-foreground font-mono">
                       {inv.teamName}
                     </p>
-                    <p className="text-xs text-white-500 font-mono mt-0.5">
+                    <p className="text-xs text-muted-foreground font-mono mt-0.5">
                       Expires {new Date(inv.expiresAt).toLocaleDateString()} ·{" "}
                       {inv.useCount}/{inv.maxUses} uses
                     </p>
@@ -425,14 +425,14 @@ const UserProfile = () => {
                       </span>
                     )}
                     {used && !expired && (
-                      <span className="text-xs text-white-500 font-mono">
+                      <span className="text-xs text-muted-foreground font-mono">
                         used
                       </span>
                     )}
                     {!expired && !used && (
                       <button
                         onClick={() => copyToClipboard(url, inv.id)}
-                        className="flex items-center gap-1.5 text-xs text-white-400 hover:text-white font-mono bg-dark-700 hover:bg-dark-600 px-3 py-1.5 rounded-lg transition-colors border border-dark-600/60"
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground font-mono bg-secondary hover:bg-accent px-3 py-1.5 rounded-lg transition-colors border border-border/60"
                       >
                         {copiedId === inv.id ? (
                           <CheckCircle className="w-3.5 h-3.5 text-success-400" />

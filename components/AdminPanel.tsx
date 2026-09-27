@@ -50,7 +50,7 @@ const TabButton = ({
     className={`px-4 py-2 text-sm font-mono rounded-lg transition-colors ${
       active
         ? "bg-primary-600/30 text-primary-300 border border-primary-500/40"
-        : "text-white-400 hover:text-white hover:bg-dark-700/50"
+        : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
     }`}
   >
     {children}
@@ -81,12 +81,12 @@ const Modal = ({
   children: React.ReactNode;
 }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-    <div className="bg-dark-800 border border-dark-700 rounded-xl w-full max-w-md shadow-2xl">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-dark-700">
-        <span className="text-sm font-bold text-white font-mono">{title}</span>
+    <div className="bg-card border border-border rounded-xl w-full max-w-md shadow-2xl">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <span className="text-sm font-bold text-foreground font-mono">{title}</span>
         <button
           onClick={onClose}
-          className="text-white-400 hover:text-white transition-colors text-lg leading-none"
+          className="text-muted-foreground hover:text-foreground transition-colors text-lg leading-none"
         >
           ✕
         </button>
@@ -238,10 +238,10 @@ const AdminPanel = () => {
             <Shield className="w-5 h-5 text-yellow-400" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white font-mono">
+            <h1 className="text-lg font-bold text-foreground font-mono">
               Admin Panel
             </h1>
-            <p className="text-xs text-white-500 font-mono">
+            <p className="text-xs text-muted-foreground font-mono">
               Manage users, teams & invites
             </p>
           </div>
@@ -249,7 +249,7 @@ const AdminPanel = () => {
         <button
           onClick={loadAll}
           disabled={loading}
-          className="flex items-center gap-1.5 text-xs text-white-400 hover:text-white bg-dark-700 hover:bg-dark-600 border border-dark-600/60 px-3 py-2 rounded-lg font-mono transition-colors disabled:opacity-50"
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent border border-border/60 px-3 py-2 rounded-lg font-mono transition-colors disabled:opacity-50"
         >
           <RefreshCw
             className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
@@ -273,14 +273,14 @@ const AdminPanel = () => {
 
       {/* ── Users tab ── */}
       {tab === "users" && (
-        <div className="bg-dark-800 border border-dark-700 rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3 border-b border-dark-700">
-            <span className="text-xs font-mono text-white-500 uppercase tracking-wider">
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+            <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
               All Users
             </span>
             <button
               onClick={() => setCreateUserOpen(true)}
-              className="flex items-center gap-1.5 text-xs text-white bg-primary-600 hover:bg-primary-500 px-3 py-1.5 rounded-lg font-mono transition-colors"
+              className="flex items-center gap-1.5 text-xs text-foreground bg-primary-600 hover:bg-primary-500 px-3 py-1.5 rounded-lg font-mono transition-colors"
             >
               <UserPlus className="w-3.5 h-3.5" />
               New User
@@ -288,18 +288,18 @@ const AdminPanel = () => {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-white-500 text-sm font-mono gap-2">
+            <div className="flex items-center justify-center py-16 text-muted-foreground text-sm font-mono gap-2">
               <RefreshCw className="w-4 h-4 animate-spin" />
               Loading…
             </div>
           ) : users.length === 0 ? (
-            <div className="text-center py-16 text-white-500 text-sm font-mono">
+            <div className="text-center py-16 text-muted-foreground text-sm font-mono">
               No users found.
             </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-dark-700 text-[11px] text-white-600 uppercase tracking-wider font-mono">
+                <tr className="border-b border-border text-[11px] text-muted-foreground/80 uppercase tracking-wider font-mono">
                   <th className="px-5 py-2.5 text-left">Username</th>
                   <th className="px-5 py-2.5 text-left">Email</th>
                   <th className="px-5 py-2.5 text-left">Role</th>
@@ -312,7 +312,7 @@ const AdminPanel = () => {
                 {users.map((user, idx) => (
                   <tr
                     key={user.id}
-                    className={`border-b border-dark-700/50 hover:bg-dark-700/20 transition-colors ${
+                    className={`border-b border-border/50 hover:bg-secondary/20 transition-colors ${
                       idx === users.length - 1 ? "border-b-0" : ""
                     }`}
                   >
@@ -323,23 +323,23 @@ const AdminPanel = () => {
                             {user.username[0]}
                           </span>
                         </div>
-                        <span className="text-white font-mono font-semibold">
+                        <span className="text-foreground font-mono font-semibold">
                           {user.username}
                         </span>
                         {!user.active && (
-                          <span className="text-[11px] text-white-600 font-mono">
+                          <span className="text-[11px] text-muted-foreground/80 font-mono">
                             (inactive)
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="px-5 py-3.5 text-white-400 font-mono text-xs">
+                    <td className="px-5 py-3.5 text-muted-foreground font-mono text-xs">
                       {user.email || "—"}
                     </td>
                     <td className="px-5 py-3.5">
                       <RoleBadge role={user.role} />
                     </td>
-                    <td className="px-5 py-3.5 text-white-400 font-mono text-xs">
+                    <td className="px-5 py-3.5 text-muted-foreground font-mono text-xs">
                       {user.teams?.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {user.teams.map((tid) => {
@@ -347,7 +347,7 @@ const AdminPanel = () => {
                             return (
                               <span
                                 key={tid}
-                                className="px-1.5 py-0.5 bg-dark-700 border border-dark-600 rounded text-[11px] font-mono"
+                                className="px-1.5 py-0.5 bg-secondary border border-border rounded text-[11px] font-mono"
                               >
                                 {team?.name ?? tid}
                               </span>
@@ -355,10 +355,10 @@ const AdminPanel = () => {
                           })}
                         </div>
                       ) : (
-                        <span className="text-white-600">none</span>
+                        <span className="text-muted-foreground/80">none</span>
                       )}
                     </td>
-                    <td className="px-5 py-3.5 text-white-500 font-mono text-xs">
+                    <td className="px-5 py-3.5 text-muted-foreground font-mono text-xs">
                       {fmtDate(user.lastLogin)}
                     </td>
                     <td className="px-5 py-3.5">
@@ -366,28 +366,28 @@ const AdminPanel = () => {
                         <button
                           onClick={() => setAssignTeamUser(user)}
                           title="Assign to team"
-                          className="p-1.5 text-white-500 hover:text-primary-300 hover:bg-primary-500/10 rounded transition-colors"
+                          className="p-1.5 text-muted-foreground hover:text-primary-300 hover:bg-primary-500/10 rounded transition-colors"
                         >
                           <Users className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => toggleRole(user)}
                           title={`Make ${user.role === "admin" ? "user" : "admin"}`}
-                          className="p-1.5 text-white-500 hover:text-yellow-300 hover:bg-yellow-500/10 rounded transition-colors"
+                          className="p-1.5 text-muted-foreground hover:text-yellow-300 hover:bg-yellow-500/10 rounded transition-colors"
                         >
                           <Shield className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => setResetPwUser(user)}
                           title="Reset password"
-                          className="p-1.5 text-white-500 hover:text-cyan-300 hover:bg-cyan-500/10 rounded transition-colors"
+                          className="p-1.5 text-muted-foreground hover:text-cyan-300 hover:bg-cyan-500/10 rounded transition-colors"
                         >
                           <Key className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => deleteUser(user)}
                           title="Delete user"
-                          className="p-1.5 text-white-500 hover:text-danger-400 hover:bg-danger-500/10 rounded transition-colors"
+                          className="p-1.5 text-muted-foreground hover:text-danger-400 hover:bg-danger-500/10 rounded transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -403,14 +403,14 @@ const AdminPanel = () => {
 
       {/* ── Teams tab ── */}
       {tab === "teams" && (
-        <div className="bg-dark-800 border border-dark-700 rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3 border-b border-dark-700">
-            <span className="text-xs font-mono text-white-500 uppercase tracking-wider">
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+            <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
               Project Teams
             </span>
             <button
               onClick={() => setCreateTeamOpen(true)}
-              className="flex items-center gap-1.5 text-xs text-white bg-primary-600 hover:bg-primary-500 px-3 py-1.5 rounded-lg font-mono transition-colors"
+              className="flex items-center gap-1.5 text-xs text-foreground bg-primary-600 hover:bg-primary-500 px-3 py-1.5 rounded-lg font-mono transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
               New Team
@@ -418,16 +418,16 @@ const AdminPanel = () => {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-white-500 text-sm font-mono gap-2">
+            <div className="flex items-center justify-center py-16 text-muted-foreground text-sm font-mono gap-2">
               <RefreshCw className="w-4 h-4 animate-spin" />
               Loading…
             </div>
           ) : teams.length === 0 ? (
-            <div className="text-center py-16 text-white-500 text-sm font-mono">
+            <div className="text-center py-16 text-muted-foreground text-sm font-mono">
               No teams yet. Create one to get started.
             </div>
           ) : (
-            <div className="divide-y divide-dark-700/50">
+            <div className="divide-y divide-border/50">
               {teams.map((team) => {
                 const members = users.filter((u) =>
                   team.memberIds?.includes(u.id),
@@ -436,15 +436,15 @@ const AdminPanel = () => {
                   <div key={team.id} className="px-5 py-4">
                     <div className="flex items-start justify-between">
                       <div>
-                        <p className="text-sm font-bold text-white font-mono">
+                        <p className="text-sm font-bold text-foreground font-mono">
                           {team.name}
                         </p>
                         {team.description && (
-                          <p className="text-xs text-white-500 font-mono mt-0.5">
+                          <p className="text-xs text-muted-foreground font-mono mt-0.5">
                             {team.description}
                           </p>
                         )}
-                        <div className="flex items-center gap-3 mt-2 text-xs text-white-600 font-mono">
+                        <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground/80 font-mono">
                           <span>
                             {members.length} member
                             {members.length !== 1 ? "s" : ""}
@@ -462,7 +462,7 @@ const AdminPanel = () => {
                             {members.map((m) => (
                               <span
                                 key={m.id}
-                                className="inline-flex items-center gap-1 text-[11px] bg-dark-700 border border-dark-600 text-white-300 px-2 py-0.5 rounded font-mono"
+                                className="inline-flex items-center gap-1 text-[11px] bg-secondary border border-border text-foreground/80 px-2 py-0.5 rounded font-mono"
                               >
                                 {m.username}
                               </span>
@@ -474,7 +474,7 @@ const AdminPanel = () => {
                         <button
                           onClick={() => setCreateInviteOpen(true)}
                           title="Create invite link for this team"
-                          className="flex items-center gap-1.5 text-xs text-white-400 hover:text-white bg-dark-700 hover:bg-dark-600 border border-dark-600/60 px-3 py-1.5 rounded-lg font-mono transition-colors"
+                          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent border border-border/60 px-3 py-1.5 rounded-lg font-mono transition-colors"
                           data-team-id={team.id}
                         >
                           <LinkIcon className="w-3.5 h-3.5" />
@@ -482,7 +482,7 @@ const AdminPanel = () => {
                         </button>
                         <button
                           onClick={() => deleteTeam(team)}
-                          className="p-1.5 text-white-500 hover:text-danger-400 hover:bg-danger-500/10 rounded transition-colors"
+                          className="p-1.5 text-muted-foreground hover:text-danger-400 hover:bg-danger-500/10 rounded transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -498,14 +498,14 @@ const AdminPanel = () => {
 
       {/* ── Invites tab ── */}
       {tab === "invites" && (
-        <div className="bg-dark-800 border border-dark-700 rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3 border-b border-dark-700">
-            <span className="text-xs font-mono text-white-500 uppercase tracking-wider">
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+            <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
               Invite Links
             </span>
             <button
               onClick={() => setCreateInviteOpen(true)}
-              className="flex items-center gap-1.5 text-xs text-white bg-primary-600 hover:bg-primary-500 px-3 py-1.5 rounded-lg font-mono transition-colors"
+              className="flex items-center gap-1.5 text-xs text-foreground bg-primary-600 hover:bg-primary-500 px-3 py-1.5 rounded-lg font-mono transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
               Create Invite
@@ -513,18 +513,18 @@ const AdminPanel = () => {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-white-500 text-sm font-mono gap-2">
+            <div className="flex items-center justify-center py-16 text-muted-foreground text-sm font-mono gap-2">
               <RefreshCw className="w-4 h-4 animate-spin" />
               Loading…
             </div>
           ) : invites.length === 0 ? (
-            <div className="text-center py-16 text-white-500 text-sm font-mono">
+            <div className="text-center py-16 text-muted-foreground text-sm font-mono">
               No invite links yet.
             </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-dark-700 text-[11px] text-white-600 uppercase tracking-wider font-mono">
+                <tr className="border-b border-border text-[11px] text-muted-foreground/80 uppercase tracking-wider font-mono">
                   <th className="px-5 py-2.5 text-left">Team</th>
                   <th className="px-5 py-2.5 text-left">Created By</th>
                   <th className="px-5 py-2.5 text-left">Expires</th>
@@ -543,20 +543,20 @@ const AdminPanel = () => {
                   return (
                     <tr
                       key={inv.id}
-                      className={`border-b border-dark-700/50 hover:bg-dark-700/20 transition-colors ${
+                      className={`border-b border-border/50 hover:bg-secondary/20 transition-colors ${
                         idx === invites.length - 1 ? "border-b-0" : ""
                       }`}
                     >
-                      <td className="px-5 py-3.5 text-white font-mono font-semibold">
+                      <td className="px-5 py-3.5 text-foreground font-mono font-semibold">
                         {inv.teamName}
                       </td>
-                      <td className="px-5 py-3.5 text-white-400 font-mono text-xs">
+                      <td className="px-5 py-3.5 text-muted-foreground font-mono text-xs">
                         {inv.createdBy}
                       </td>
-                      <td className="px-5 py-3.5 text-white-400 font-mono text-xs">
+                      <td className="px-5 py-3.5 text-muted-foreground font-mono text-xs">
                         {fmtDate(inv.expiresAt)}
                       </td>
-                      <td className="px-5 py-3.5 text-white-400 font-mono text-xs">
+                      <td className="px-5 py-3.5 text-muted-foreground font-mono text-xs">
                         {inv.useCount}/{inv.maxUses}
                       </td>
                       <td className="px-5 py-3.5">
@@ -565,11 +565,11 @@ const AdminPanel = () => {
                             active
                           </span>
                         ) : expired ? (
-                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-700 text-white-500 border border-dark-600">
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
                             expired
                           </span>
                         ) : (
-                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-700 text-white-500 border border-dark-600">
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
                             exhausted
                           </span>
                         )}
@@ -580,7 +580,7 @@ const AdminPanel = () => {
                             <button
                               onClick={() => copyToClipboard(invUrl, inv.id)}
                               title="Copy invite URL"
-                              className="flex items-center gap-1.5 text-xs text-white-400 hover:text-white bg-dark-700 hover:bg-dark-600 border border-dark-600/60 px-3 py-1.5 rounded-lg font-mono transition-colors"
+                              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent border border-border/60 px-3 py-1.5 rounded-lg font-mono transition-colors"
                             >
                               {copiedId === inv.id ? (
                                 <CheckCircle className="w-3.5 h-3.5 text-success-400" />
@@ -593,7 +593,7 @@ const AdminPanel = () => {
                           <button
                             onClick={() => revokeInvite(inv)}
                             title="Revoke invite"
-                            className="p-1.5 text-white-500 hover:text-danger-400 hover:bg-danger-500/10 rounded transition-colors"
+                            className="p-1.5 text-muted-foreground hover:text-danger-400 hover:bg-danger-500/10 rounded transition-colors"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -721,7 +721,7 @@ const CreateUserModal = ({
     <Modal title="Create New User" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+          <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
             Username
           </label>
           <input
@@ -731,11 +731,11 @@ const CreateUserModal = ({
             required
             placeholder="johndoe"
             autoFocus
-            className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono"
+            className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono"
           />
         </div>
         <div>
-          <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+          <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
             Email (optional)
           </label>
           <input
@@ -743,11 +743,11 @@ const CreateUserModal = ({
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="john@example.com"
-            className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono"
+            className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono"
           />
         </div>
         <div>
-          <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+          <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
             Password
           </label>
           <input
@@ -758,18 +758,18 @@ const CreateUserModal = ({
             minLength={8}
             placeholder="min 8 characters"
             autoComplete="new-password"
-            className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono"
+            className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono"
           />
         </div>
         <div>
-          <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+          <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
             Role
           </label>
           <div className="flex gap-3">
             {(["user", "admin"] as const).map((r) => (
               <label
                 key={r}
-                className="flex items-center gap-2 cursor-pointer text-sm text-white-300 font-mono"
+                className="flex items-center gap-2 cursor-pointer text-sm text-foreground/80 font-mono"
               >
                 <input
                   type="radio"
@@ -789,7 +789,7 @@ const CreateUserModal = ({
           <button
             type="submit"
             disabled={saving}
-            className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
+            className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-foreground px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
           >
             {saving ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -801,7 +801,7 @@ const CreateUserModal = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 text-sm text-white-400 hover:text-white bg-dark-700 hover:bg-dark-600 rounded-lg font-mono transition-colors"
+            className="px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent rounded-lg font-mono transition-colors"
           >
             Cancel
           </button>
@@ -861,13 +861,13 @@ const ResetPasswordModal = ({
   return (
     <Modal title={`Reset Password — ${user.username}`} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <p className="text-xs text-white-500 font-mono">
+        <p className="text-xs text-muted-foreground font-mono">
           Set a new password for{" "}
-          <span className="text-white">{user.username}</span>. The user will
+          <span className="text-foreground">{user.username}</span>. The user will
           need to log in again with the new password.
         </p>
         <div>
-          <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+          <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
             New Password
           </label>
           <input
@@ -879,7 +879,7 @@ const ResetPasswordModal = ({
             placeholder="min 8 characters"
             autoFocus
             autoComplete="new-password"
-            className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono"
+            className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono"
           />
         </div>
         <StatusMsg status={status} />
@@ -887,7 +887,7 @@ const ResetPasswordModal = ({
           <button
             type="submit"
             disabled={saving}
-            className="flex-1 flex items-center justify-center gap-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
+            className="flex-1 flex items-center justify-center gap-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-foreground px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
           >
             {saving ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -899,7 +899,7 @@ const ResetPasswordModal = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 text-sm text-white-400 hover:text-white bg-dark-700 hover:bg-dark-600 rounded-lg font-mono transition-colors"
+            className="px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent rounded-lg font-mono transition-colors"
           >
             Cancel
           </button>
@@ -961,7 +961,7 @@ const AssignTeamModal = ({
     <Modal title={`Assign Teams — ${user.username}`} onClose={onClose}>
       <form onSubmit={handleSave} className="space-y-4">
         {teams.length === 0 ? (
-          <p className="text-white-500 text-sm font-mono">
+          <p className="text-muted-foreground text-sm font-mono">
             No teams available. Create a team first.
           </p>
         ) : (
@@ -969,7 +969,7 @@ const AssignTeamModal = ({
             {teams.map((team) => (
               <label
                 key={team.id}
-                className="flex items-center gap-3 cursor-pointer bg-dark-900 border border-dark-700 rounded-lg px-4 py-3 hover:bg-dark-700/30 transition-colors"
+                className="flex items-center gap-3 cursor-pointer bg-background border border-border rounded-lg px-4 py-3 hover:bg-secondary/30 transition-colors"
               >
                 <input
                   type="checkbox"
@@ -978,11 +978,11 @@ const AssignTeamModal = ({
                   className="accent-primary-500 w-4 h-4"
                 />
                 <div>
-                  <p className="text-sm font-semibold text-white font-mono">
+                  <p className="text-sm font-semibold text-foreground font-mono">
                     {team.name}
                   </p>
                   {team.description && (
-                    <p className="text-xs text-white-500 font-mono mt-0.5">
+                    <p className="text-xs text-muted-foreground font-mono mt-0.5">
                       {team.description}
                     </p>
                   )}
@@ -996,7 +996,7 @@ const AssignTeamModal = ({
           <button
             type="submit"
             disabled={saving || teams.length === 0}
-            className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
+            className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-foreground px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
           >
             {saving ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1008,7 +1008,7 @@ const AssignTeamModal = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 text-sm text-white-400 hover:text-white bg-dark-700 hover:bg-dark-600 rounded-lg font-mono transition-colors"
+            className="px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent rounded-lg font-mono transition-colors"
           >
             Cancel
           </button>
@@ -1062,7 +1062,7 @@ const CreateTeamModal = ({
     <Modal title="Create Project Team" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+          <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
             Team Name
           </label>
           <input
@@ -1072,11 +1072,11 @@ const CreateTeamModal = ({
             required
             placeholder="Red Team Alpha"
             autoFocus
-            className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono"
+            className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono"
           />
         </div>
         <div>
-          <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+          <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
             Description (optional)
           </label>
           <textarea
@@ -1084,7 +1084,7 @@ const CreateTeamModal = ({
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Briefly describe this team's focus…"
             rows={2}
-            className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono resize-none"
+            className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 font-mono resize-none"
           />
         </div>
         <StatusMsg status={status} />
@@ -1092,7 +1092,7 @@ const CreateTeamModal = ({
           <button
             type="submit"
             disabled={saving}
-            className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
+            className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-foreground px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
           >
             {saving ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1104,7 +1104,7 @@ const CreateTeamModal = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 text-sm text-white-400 hover:text-white bg-dark-700 hover:bg-dark-600 rounded-lg font-mono transition-colors"
+            className="px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent rounded-lg font-mono transition-colors"
           >
             Cancel
           </button>
@@ -1177,8 +1177,8 @@ const CreateInviteModal = ({
               this link with the user.
             </p>
           </div>
-          <div className="bg-dark-900 border border-dark-600 rounded-lg px-3 py-3">
-            <p className="text-xs text-white-500 font-mono mb-2 uppercase tracking-wider">
+          <div className="bg-background border border-border rounded-lg px-3 py-3">
+            <p className="text-xs text-muted-foreground font-mono mb-2 uppercase tracking-wider">
               Invite URL
             </p>
             <p className="text-xs text-cyan-300 font-mono break-all select-all">
@@ -1193,7 +1193,7 @@ const CreateInviteModal = ({
                   setTimeout(() => setCopiedCreated(false), 2000);
                 });
               }}
-              className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
+              className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 text-foreground px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
             >
               {copiedCreated ? (
                 <CheckCircle className="w-3.5 h-3.5 text-success-400" />
@@ -1204,7 +1204,7 @@ const CreateInviteModal = ({
             </button>
             <button
               onClick={onClose}
-              className="px-4 py-2.5 text-sm text-white-400 hover:text-white bg-dark-700 hover:bg-dark-600 rounded-lg font-mono transition-colors"
+              className="px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent rounded-lg font-mono transition-colors"
             >
               Done
             </button>
@@ -1218,7 +1218,7 @@ const CreateInviteModal = ({
     <Modal title="Create Invite Link" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+          <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
             Project Team
           </label>
           {teams.length === 0 ? (
@@ -1229,7 +1229,7 @@ const CreateInviteModal = ({
             <select
               value={teamId}
               onChange={(e) => setTeamId(e.target.value)}
-              className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary-500/60 font-mono"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary-500/60 font-mono"
             >
               {teams.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -1241,7 +1241,7 @@ const CreateInviteModal = ({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+            <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
               Max Uses
             </label>
             <input
@@ -1250,11 +1250,11 @@ const CreateInviteModal = ({
               onChange={(e) => setMaxUses(Math.max(1, Number(e.target.value)))}
               min={1}
               max={100}
-              className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary-500/60 font-mono"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary-500/60 font-mono"
             />
           </div>
           <div>
-            <label className="block text-[11px] font-mono text-white-600 mb-1.5 uppercase tracking-wider">
+            <label className="block text-[11px] font-mono text-muted-foreground/80 mb-1.5 uppercase tracking-wider">
               Expires (days)
             </label>
             <input
@@ -1265,7 +1265,7 @@ const CreateInviteModal = ({
               }
               min={1}
               max={365}
-              className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary-500/60 font-mono"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary-500/60 font-mono"
             />
           </div>
         </div>
@@ -1274,7 +1274,7 @@ const CreateInviteModal = ({
           <button
             type="submit"
             disabled={saving || teams.length === 0}
-            className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
+            className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-foreground px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors font-mono"
           >
             {saving ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1286,7 +1286,7 @@ const CreateInviteModal = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 text-sm text-white-400 hover:text-white bg-dark-700 hover:bg-dark-600 rounded-lg font-mono transition-colors"
+            className="px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent rounded-lg font-mono transition-colors"
           >
             Cancel
           </button>

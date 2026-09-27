@@ -68,6 +68,39 @@ export interface Target {
   axiomFleetSize: number; // How many instances used
   rawWhoisData?: Record<string, string>; // domain → full whois text (populated by bridge)
   sources?: string[]; // source filenames that built this target
+  // Rekono-inspired enrichment fields
+  notes?: string;
+  tags?: string[];
+  falsePositiveVulnIds?: string[];
+  riskScore?: number;
+  riskLevel?: "NONE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+}
+
+export interface TriageFinding extends Vulnerability {
+  targetId: string;
+  targetDomain: string;
+  isFalsePositive: boolean;
+  isDuplicate: boolean;
+}
+
+export interface CveDetail {
+  id: string;
+  description: string;
+  cvssV3Score: number | null;
+  cvssV3Severity: string | null;
+  cvssV3Vector: string | null;
+  published: string;
+  lastModified: string;
+  references: string[];
+}
+
+export interface WordlistEntry {
+  path: string;
+  name: string;
+  category: "subdomains" | "directories" | "passwords" | "usernames" | "fuzzing" | "api" | "general";
+  size: number;
+  lineCount: number;
+  relPath: string;
 }
 
 export interface FleetInstance {
@@ -103,6 +136,14 @@ export interface AppUser {
   createdAt: string;
   lastLogin?: string;
   active: boolean;
+}
+
+export interface AxProject {
+  token: string;
+  name: string;
+  client: string;
+  project_type: string;
+  ghostwriter_id: number;
 }
 
 export interface ProjectTeam {

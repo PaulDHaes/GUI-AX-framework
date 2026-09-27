@@ -217,11 +217,11 @@ export default function FleetControl({
       {/* Header with Quick Actions */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+          <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <Server className="h-5 w-5 text-primary-500" />
             Fleet Management
           </h2>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-muted-foreground text-sm mt-1">
             Manage your Axiom cloud instances
           </p>
         </div>
@@ -273,18 +273,18 @@ export default function FleetControl({
                 Execute Command
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl bg-slate-800 border-slate-700">
+            <DialogContent className="max-w-2xl bg-card border-border">
               <DialogHeader>
-                <DialogTitle className="text-white">
+                <DialogTitle className="text-foreground">
                   Execute Command on Fleet
                 </DialogTitle>
-                <DialogDescription className="text-slate-400">
+                <DialogDescription className="text-muted-foreground">
                   Run a shell command across selected instances
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="pattern" className="text-white">
+                  <Label htmlFor="pattern" className="text-foreground">
                     Instance Pattern
                   </Label>
                   <Input
@@ -295,7 +295,7 @@ export default function FleetControl({
                   />
                 </div>
                 <div>
-                  <Label htmlFor="command" className="text-white">
+                  <Label htmlFor="command" className="text-foreground">
                     Command
                   </Label>
                   <Input
@@ -307,7 +307,7 @@ export default function FleetControl({
                 </div>
                 {execOutput && (
                   <div>
-                    <Label className="text-white">Output</Label>
+                    <Label className="text-foreground">Output</Label>
                     <Textarea
                       value={execOutput}
                       readOnly
@@ -360,7 +360,7 @@ export default function FleetControl({
           )}
 
           {fleet.length === 0 ? (
-            <div className="text-center py-8 text-slate-400">
+            <div className="text-center py-8 text-muted-foreground">
               No instances in fleet. Use "axiom-init" or "axiom-fleet" to launch
               instances.
             </div>
@@ -368,7 +368,7 @@ export default function FleetControl({
             <>
               {selectedInstances.length > 0 && (
                 <div className="mb-3 flex flex-wrap items-center gap-2 px-3 py-2.5 bg-violet-500/10 border border-violet-500/30 rounded-lg">
-                  <span className="text-sm text-violet-300 font-mono mr-2">
+                  <span className="text-sm text-primary font-mono mr-2">
                     {selectedInstances.length} instance
                     {selectedInstances.length > 1 ? "s" : ""} selected
                   </span>
@@ -503,7 +503,7 @@ export default function FleetControl({
                         <Badge variant="outline">{instance.provider}</Badge>
                       </TableCell>
                       <TableCell>{instance.region}</TableCell>
-                      <TableCell className="text-[13px] text-slate-400">
+                      <TableCell className="text-[13px] text-muted-foreground">
                         {instance.instanceType}
                       </TableCell>
                       <TableCell>
@@ -532,7 +532,7 @@ export default function FleetControl({
                               //size="sm"
                               onClick={() => onHide(instance.id)}
                               title="Hide from list (not deleted)"
-                              className="text-slate-500 hover:text-amber-400"
+                              className="text-muted-foreground hover:text-amber-400"
                             >
                               <EyeOff className="h-3 w-3" />
                             </Button>
@@ -565,12 +565,12 @@ export default function FleetControl({
       {/* Confirmation Dialog */}
       {confirmDialog.open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="relative bg-slate-800 border border-slate-700 rounded-lg shadow-lg p-6 max-w-lg w-full mx-4">
-            <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+          <div className="relative bg-card border border-border rounded-lg shadow-lg p-6 max-w-lg w-full mx-4">
+            <h2 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
               <AlertCircle className="h-5 w-5 text-yellow-500" />
               {confirmDialog.title}
             </h2>
-            <p className="text-slate-300 mb-6">{confirmDialog.message}</p>
+            <p className="text-foreground/80 mb-6">{confirmDialog.message}</p>
             <div className="flex justify-end gap-2">
               <Button
                 variant="outline"

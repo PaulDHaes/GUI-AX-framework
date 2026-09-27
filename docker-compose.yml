@@ -14,15 +14,68 @@ services:
     # Silicon). Pinning linux/amd64 forced QEMU emulation, under which the
     # bundled AWS CLI busy-loops on every network call and wedges axiom.
     ports:
-      - "3000:3000" # Vite UI (host 3001 — 3000 is taken by another container)
+      - "3000:3000" # Vite UI
       - "5000:5000" # Flask bridge API
       - "8787:8787" # MCP server (started from Settings → MCP Server; streamable-HTTP)
     volumes:
       # ── Persistent data (survives restarts) ──────────────────────────────
       - gui-ax-data:/app/data
+      # ── Live source bind-mounts (hot-reload via Vite HMR) ─────────────────
+      - ./App.tsx:/app/App.tsx
+      - ./index.tsx:/app/index.tsx
+      - ./index.html:/app/index.html
+      - ./types.ts:/app/types.ts
+      - ./globals.css:/app/globals.css
+      - ./components:/app/components
+      - ./lib:/app/lib
+      - ./tools:/app/tools
+      - ./services:/app/services
+      - ./package.json:/app/package.json
+      - ./postcss.config.js:/app/postcss.config.js
+      - ./tailwind.config.ts:/app/tailwind.config.ts
+      - ./vite.config.ts:/app/vite.config.ts
     environment:
+      # ── Bridge ────────────────────────────────────────────────────────────
       - PORT=5000
       - HOST=0.0.0.0
+
+      # ── Authentication ────────────────────────────────────────────────────
+      # Secrets are read from a local, git-ignored .env file (see .env.example).
+      # Copy .env.example to .env and fill in real values — never commit them.
+      # Set GUI_AX_PASSWORD to enable the login gate; leave empty to run open.
+      - GUI_AX_PASSWORD=${GUI_AX_PASSWORD:-}
+      - GUI_AX_USERNAME=${GUI_AX_USERNAME:-admin}
+      # Optional: a stable session key so open browser sessions survive bridge
+      # restarts. Generate: python3 -c "import secrets; print(secrets.token_hex(32))"
+      - GUI_AX_SECRET_KEY=${GUI_AX_SECRET_KEY:-}
+      # Optional: a static token so existing sessions survive bridge restarts.
+      # Generate: python3 -c "import secrets; print(secrets.token_hex(32))"
+      - GUI_AX_STATIC_TOKEN=${GUI_AX_STATIC_TOKEN:-}
+
+      # ── AI providers (optional — local analysis always available) ───────────
+      # Values are read from .env (copy .env.example → .env and fill in).
+      # OLLAMA_URL defaults to host.docker.internal so Mac Ollama works out of
+      # the box; override in .env for a LiteLLM proxy or remote host.
+      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      # Claude API (optional — sends prompts to Anthropic; set in .env):
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+
+      # ── Performance tuning (optional — defaults shown) ────────────────────
+      # How often (seconds) the bridge rescans imports/ for new scan output.
+      # - WATCHER_INTERVAL=300
+      # How long (seconds) fleet data is cached before re-querying the cloud.
+      # - FLEET_CACHE_TTL=30
+      # Directory for per-workflow step logs (workflow-runner.py).
+      # - WF_LOG_DIR=/tmp/workflow-logs
+
+      # ── Geo Map offline geolocation (optional) ────────────────────────────
+      # Drop a MaxMind GeoLite2-City.mmdb into data/ and uncomment this to
+      # enable offline IP geolocation on the Geo Map.
+      # - GEOIP_DB_PATH=/app/data/GeoLite2-City.mmdb
+
+      # ── AWS CLI hardening ─────────────────────────────────────────────────
       # Cuts AWS SDK retries so a down region fails fast instead of the
       # default 3 attempts (each with its own connect/read timeout).
       - AWS_MAX_ATTEMPTS=1
@@ -36,17 +89,7 @@ services:
       # so none is ever queried. Requires running that script once inside the
       # container; see its header.
       - AXIOM_EXCLUDED_REGIONS=me-south-1 me-central-1 il-central-1
-      # ── Authentication ────────────────────────────────────────────────────
-      # Secrets are read from a local, git-ignored .env file (see .env.example).
-      # Copy .env.example to .env and fill in real values — never commit them.
-      # Set GUI_AX_PASSWORD to enable the login gate; leave empty to run open.
-      - GUI_AX_PASSWORD=${GUI_AX_PASSWORD:-}
-      - GUI_AX_USERNAME=${GUI_AX_USERNAME:-admin}
-      # Optional: a static token so existing sessions survive bridge restarts.
-      # Generate one with: python3 -c "import secrets; print(secrets.token_hex(32))"
-      - GUI_AX_STATIC_TOKEN=${GUI_AX_STATIC_TOKEN:-}
-      # Uncomment and set your Gemini key to enable the AI panel:
-      # - GEMINI_API_KEY=your_key_here
+
     stdin_open: true # Required for interactive axiom-configure
     tty: true # Required for interactive axiom-configure
     restart: unless-stopped

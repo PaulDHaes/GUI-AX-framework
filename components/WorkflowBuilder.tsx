@@ -51,6 +51,7 @@ interface ModuleInfo {
   name: string;
   label: string;
   category:
+    | "osint"
     | "enum"
     | "dns"
     | "port"
@@ -122,6 +123,8 @@ interface WorkflowTemplate {
   custom?: boolean;
   /** ISO string; only set on custom templates. */
   createdAt?: string;
+  /** UUID string returned by the bridge when the template is synced server-side. */
+  server_id?: string;
 }
 
 interface WorkflowRun {
@@ -491,6 +494,46 @@ const MODULE_CATALOG: ModuleInfo[] = [
     "text-indigo-400",
     "border-indigo-500/30",
     Eye,
+  ),
+  // ── OSINT modules (Rekono-inspired stage 1) ────────────────────────────────
+  M(
+    "theHarvester",
+    "theHarvester",
+    "osint",
+    ["domains", "mixed"],
+    "mixed",
+    "OSINT harvesting — emails, subdomains, hosts, IPs from public sources",
+    1,
+    "bg-violet-500/15",
+    "text-violet-400",
+    "border-violet-500/30",
+    Search,
+  ),
+  M(
+    "whois",
+    "Whois",
+    "osint",
+    ["domains", "mixed"],
+    "mixed",
+    "WHOIS registration data — registrar, contacts, name servers",
+    1,
+    "bg-violet-500/15",
+    "text-violet-400",
+    "border-violet-500/30",
+    Search,
+  ),
+  M(
+    "shodan",
+    "Shodan",
+    "osint",
+    ["domains", "ips", "mixed"],
+    "mixed",
+    "Internet-wide device scan data via Shodan API",
+    1,
+    "bg-violet-500/15",
+    "text-violet-400",
+    "border-violet-500/30",
+    Globe,
   ),
 ];
 
@@ -908,6 +951,7 @@ const CATEGORY_META: Record<
   ModuleInfo["category"],
   { label: string; color: string }
 > = {
+  osint: { label: "OSINT", color: "text-violet-400" },
   enum: { label: "Subdomain Enum", color: "text-cyan-400" },
   dns: { label: "DNS", color: "text-blue-400" },
   port: { label: "Port Scan", color: "text-orange-400" },
@@ -977,7 +1021,7 @@ function extractOutput(target: any, outputType: InputType): string[] {
 function StatusBadge({ status }: { status: StepStatus | WorkflowStatus }) {
   const cfg = {
     pending: {
-      cls: "text-white-400 bg-zinc-800 border-zinc-700",
+      cls: "text-muted-foreground bg-zinc-800 border-zinc-700",
       Icon: Clock,
       label: "Pending",
     },
@@ -1002,7 +1046,7 @@ function StatusBadge({ status }: { status: StepStatus | WorkflowStatus }) {
       label: "Skipped",
     },
     idle: {
-      cls: "text-white-400 bg-zinc-800 border-zinc-700",
+      cls: "text-muted-foreground bg-zinc-800 border-zinc-700",
       Icon: Clock,
       label: "Idle",
     },
@@ -1085,17 +1129,17 @@ function ModulePicker({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl ring-1 ring-white/5">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl ring-1 ring-foreground/5">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-dark-700">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div>
-            <h3 className="text-sm font-bold text-white">Add a scan module</h3>
+            <h3 className="text-sm font-bold text-foreground">Add a scan module</h3>
             {placementHint && (
               <p className="text-[11px] text-primary-300 mt-0.5 font-mono">
                 {placementHint}
               </p>
             )}
-            <p className="text-[12px] text-white-500 mt-0.5">
+            <p className="text-[12px] text-muted-foreground mt-0.5">
               Showing tools compatible with{" "}
               <span
                 className={`font-semibold ${INPUT_TYPE_META[filterInputType].text}`}
@@ -1116,7 +1160,7 @@ function ModulePicker({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-white-400 hover:text-white hover:bg-dark-700 transition-colors"
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -1125,14 +1169,14 @@ function ModulePicker({
         {/* Search */}
         <div className="px-4 pt-3 pb-2">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white-500 pointer-events-none" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
             <input
               autoFocus
               type="text"
               placeholder="Search tools…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-dark-900 border border-dark-600 rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-primary-500/60 focus:ring-1 focus:ring-primary-500/20"
+              className="w-full bg-background border border-border rounded-xl pl-9 pr-3 py-2 text-sm text-foreground placeholder-zinc-600 focus:outline-none focus:border-primary-500/60 focus:ring-1 focus:ring-primary-500/20"
             />
           </div>
         </div>
@@ -1141,7 +1185,7 @@ function ModulePicker({
         <div className="px-4 pb-2.5 flex gap-1.5 flex-wrap">
           <button
             onClick={() => setFilterCat("all")}
-            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors border ${filterCat === "all" ? "bg-primary-500/20 text-primary-300 border-primary-500/40" : "bg-dark-700 text-white-400 border-dark-600 hover:text-white"}`}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors border ${filterCat === "all" ? "bg-primary-500/20 text-primary-300 border-primary-500/40" : "bg-secondary text-muted-foreground border-border hover:text-foreground"}`}
           >
             All ({compatibleModules.length})
           </button>
@@ -1158,7 +1202,7 @@ function ModulePicker({
               <button
                 key={cat}
                 onClick={() => setFilterCat(cat)}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors border ${filterCat === cat ? `bg-dark-600 border-dark-500 ${CATEGORY_META[cat].color}` : "bg-dark-700 text-white-500 border-dark-600 hover:text-white-200"}`}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors border ${filterCat === cat ? `bg-accent border-border ${CATEGORY_META[cat].color}` : "bg-secondary text-muted-foreground border-border hover:text-foreground/90"}`}
               >
                 {CATEGORY_META[cat].label}
               </button>
@@ -1169,7 +1213,7 @@ function ModulePicker({
         {/* Module grid */}
         <div className="flex-1 overflow-y-auto px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
           {filtered.length === 0 && (
-            <div className="col-span-2 py-12 text-center text-white-500">
+            <div className="col-span-2 py-12 text-center text-muted-foreground">
               <Search className="w-8 h-8 mx-auto mb-2 opacity-30" />
               <p className="text-sm">No tools match</p>
             </div>
@@ -1198,7 +1242,7 @@ function ModulePicker({
                       : `Not installed on the ${PROVISIONER_LABELS[prov] ?? prov} image`
                     : undefined
                 }
-                className={`group flex items-start gap-3 text-left p-3.5 rounded-xl border transition-all hover:scale-[1.01] active:scale-[0.99] ${compatible ? `${m.borderClass} hover:border-opacity-80` : "border-dark-600 opacity-60 hover:opacity-80"} ${m.colorClass} ${!available ? "opacity-50" : ""}`}
+                className={`group flex items-start gap-3 text-left p-3.5 rounded-xl border transition-all hover:scale-[1.01] active:scale-[0.99] ${compatible ? `${m.borderClass} hover:border-opacity-80` : "border-border opacity-60 hover:opacity-80"} ${m.colorClass} ${!available ? "opacity-50" : ""}`}
               >
                 <div
                   className={`p-2 rounded-lg ${m.colorClass} border ${m.borderClass} flex-shrink-0`}
@@ -1216,16 +1260,16 @@ function ModulePicker({
                       </span>
                     )}
                     {!available && (
-                      <span className="text-[9px] text-white-500 bg-dark-700 border border-dark-600 px-1.5 py-0.5 rounded-full font-semibold">
+                      <span className="text-[9px] text-muted-foreground bg-secondary border border-border px-1.5 py-0.5 rounded-full font-semibold">
                         not in {PROVISIONER_LABELS[prov] ?? prov} image
                       </span>
                     )}
                   </div>
-                  <p className="text-[12px] text-white-400 leading-snug">
+                  <p className="text-[12px] text-muted-foreground leading-snug">
                     {m.description}
                   </p>
                   <div className="flex items-center gap-1.5 mt-1.5">
-                    <span className="text-[10px] text-white-600">outputs</span>
+                    <span className="text-[10px] text-muted-foreground/80">outputs</span>
                     <span
                       className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold border ${INPUT_TYPE_META[m.outputType]?.bg} ${INPUT_TYPE_META[m.outputType]?.text} ${INPUT_TYPE_META[m.outputType]?.border}`}
                     >
@@ -1296,7 +1340,7 @@ function StepCard({
     <div
       className={`relative rounded-xl border transition-all duration-200 ${
         !step.enabled
-          ? "border-dark-700 bg-dark-800/40 opacity-50"
+          ? "border-border bg-card/40 opacity-50"
           : isRunningNow
             ? `${m.borderClass} ${m.colorClass} ring-2 ring-offset-2 ring-offset-dark-900 ring-cyan-500/30`
             : isDone
@@ -1309,10 +1353,10 @@ function StepCard({
       <div className="flex items-stretch">
         {/* Step number column */}
         <div
-          className={`w-10 flex-shrink-0 flex items-center justify-center rounded-l-xl border-r ${!step.enabled ? "border-dark-700 bg-dark-800/60" : `${m.borderClass} ${m.colorClass}`}`}
+          className={`w-10 flex-shrink-0 flex items-center justify-center rounded-l-xl border-r ${!step.enabled ? "border-border bg-card/60" : `${m.borderClass} ${m.colorClass}`}`}
         >
           <span
-            className={`text-xs font-bold font-mono ${!step.enabled ? "text-white-600" : m.textClass}`}
+            className={`text-xs font-bold font-mono ${!step.enabled ? "text-muted-foreground/80" : m.textClass}`}
           >
             {String(index + 1).padStart(2, "0")}
           </span>
@@ -1359,7 +1403,7 @@ function StepCard({
                 {isExecuting && <StatusBadge status={status} />}
               </div>
 
-              <p className="text-[12px] text-white-400">{m.description}</p>
+              <p className="text-[12px] text-muted-foreground">{m.description}</p>
 
               {/* Type flow arrow */}
               <div className="flex items-center gap-1.5 mt-1.5">
@@ -1368,9 +1412,9 @@ function StepCard({
                 >
                   {INPUT_TYPE_META[prevOutputType]?.label}
                 </span>
-                <ArrowRight className="w-3 h-3 text-white-600 flex-shrink-0" />
+                <ArrowRight className="w-3 h-3 text-muted-foreground/80 flex-shrink-0" />
                 <Icon className={`w-3 h-3 ${m.textClass} flex-shrink-0`} />
-                <ArrowRight className="w-3 h-3 text-white-600 flex-shrink-0" />
+                <ArrowRight className="w-3 h-3 text-muted-foreground/80 flex-shrink-0" />
                 <span
                   className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold border ${INPUT_TYPE_META[m.outputType]?.bg} ${INPUT_TYPE_META[m.outputType]?.text} ${INPUT_TYPE_META[m.outputType]?.border}`}
                 >
@@ -1387,7 +1431,7 @@ function StepCard({
                     </span>
                   )}
                   {execStep.scanId && (
-                    <span className="text-white-500 truncate max-w-[200px]">
+                    <span className="text-muted-foreground truncate max-w-[200px]">
                       {execStep.scanId}
                     </span>
                   )}
@@ -1398,7 +1442,7 @@ function StepCard({
                   )}
                   {execStep.startTime instanceof Date &&
                     execStep.endTime instanceof Date && (
-                      <span className="text-white-500">
+                      <span className="text-muted-foreground">
                         {Math.round(
                           (execStep.endTime.getTime() -
                             execStep.startTime.getTime()) /
@@ -1416,7 +1460,7 @@ function StepCard({
                   <div className="mt-1.5 flex items-center gap-3 flex-wrap">
                     <button
                       onClick={() => setShowArgs((v) => !v)}
-                      className="flex items-center gap-1 text-[11px] text-white-600 hover:text-white-300 font-mono transition-colors"
+                      className="flex items-center gap-1 text-[11px] text-muted-foreground/80 hover:text-foreground/80 font-mono transition-colors"
                     >
                       <Terminal className="w-3 h-3" />
                       {showArgs ? "hide" : "custom args"}
@@ -1427,7 +1471,7 @@ function StepCard({
                       )}
                     </button>
                     {onFleetSizeChange && (
-                      <div className="flex items-center gap-1.5 text-[11px] text-white-600 font-mono">
+                      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80 font-mono">
                         <Server className="w-3 h-3" />
                         <span>instances:</span>
                         <input
@@ -1450,10 +1494,10 @@ function StepCard({
                                 onFleetSizeChange(n);
                             }
                           }}
-                          className="w-14 bg-dark-900 border border-dark-600 rounded-md px-1.5 py-0.5 text-[11px] text-white font-mono placeholder-zinc-700 focus:outline-none focus:border-primary-500/60"
+                          className="w-14 bg-background border border-border rounded-md px-1.5 py-0.5 text-[11px] text-foreground font-mono placeholder-zinc-700 focus:outline-none focus:border-primary-500/60"
                           title={`Module weight ${step.module.weight}/5 — default scales between workflow min/max instances`}
                         />
-                        <span className="text-white-700">
+                        <span className="text-muted-foreground/60">
                           (w{step.module.weight})
                         </span>
                       </div>
@@ -1465,7 +1509,7 @@ function StepCard({
                       value={step.customArgs}
                       onChange={(e) => onArgsChange(e.target.value)}
                       placeholder="e.g. -t 100 --rate 1000 -silent"
-                      className="mt-1.5 w-full bg-dark-900 border border-dark-600 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-primary-500/60"
+                      className="mt-1.5 w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-xs text-foreground font-mono placeholder-zinc-600 focus:outline-none focus:border-primary-500/60"
                     />
                   )}
                 </>
@@ -1478,7 +1522,7 @@ function StepCard({
                 <button
                   onClick={onToggle}
                   title={step.enabled ? "Disable" : "Enable"}
-                  className={`p-1.5 rounded-lg transition-colors ${step.enabled ? "text-emerald-400 hover:bg-emerald-500/10" : "text-white-600 hover:text-white-400"}`}
+                  className={`p-1.5 rounded-lg transition-colors ${step.enabled ? "text-emerald-400 hover:bg-emerald-500/10" : "text-muted-foreground/80 hover:text-muted-foreground"}`}
                 >
                   {step.enabled ? (
                     <CheckCircle2 className="w-3.5 h-3.5" />
@@ -1490,7 +1534,7 @@ function StepCard({
                   <button
                     onClick={onAddChild}
                     title="Add next step — runs sequentially, taking this step's output as its input"
-                    className="p-1.5 rounded-lg text-white-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
                   >
                     <CornerDownRight className="w-3.5 h-3.5" />
                   </button>
@@ -1499,7 +1543,7 @@ function StepCard({
                   <button
                     onClick={onAddSibling}
                     title="Add parallel step — runs alongside this one, off the same upstream input"
-                    className="p-1.5 rounded-lg text-white-500 hover:text-primary-400 hover:bg-primary-500/10 transition-colors"
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary-400 hover:bg-primary-500/10 transition-colors"
                   >
                     <GitBranch className="w-3.5 h-3.5" />
                   </button>
@@ -1508,7 +1552,7 @@ function StepCard({
                   onClick={onMoveUp}
                   disabled={index === 0}
                   title="Move up among siblings"
-                  className="p-1.5 rounded-lg text-white-500 hover:text-white hover:bg-dark-700 disabled:opacity-20 transition-colors"
+                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-20 transition-colors"
                 >
                   <ChevronUp className="w-3.5 h-3.5" />
                 </button>
@@ -1516,14 +1560,14 @@ function StepCard({
                   onClick={onMoveDown}
                   disabled={index === total - 1}
                   title="Move down among siblings"
-                  className="p-1.5 rounded-lg text-white-500 hover:text-white hover:bg-dark-700 disabled:opacity-20 transition-colors"
+                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-20 transition-colors"
                 >
                   <ChevronDown className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={onRemove}
                   title="Remove this step and its branches"
-                  className="p-1.5 rounded-lg text-white-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  className="p-1.5 rounded-lg text-muted-foreground/80 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -1596,7 +1640,7 @@ function StepTree(props: StepTreeProps) {
   const enabledSiblingIds = siblings.filter((s) => s.enabled).map((s) => s.id);
 
   return (
-    <div className={depth > 0 ? "ml-6 pl-3 border-l-2 border-dark-600" : ""}>
+    <div className={depth > 0 ? "ml-6 pl-3 border-l-2 border-border" : ""}>
       {isFanOut && (
         <div className="flex items-center gap-1.5 mt-1 mb-0.5 text-[10px] font-mono text-primary-400/80">
           <GitBranch className="w-2.5 h-2.5" />
@@ -1624,7 +1668,7 @@ function StepTree(props: StepTreeProps) {
                       ? "bg-cyan-500/60"
                       : execStep?.status === "failed"
                         ? "bg-red-500/60"
-                        : "bg-dark-600"
+                        : "bg-accent"
                 }`}
               />
             </div>
@@ -1797,7 +1841,7 @@ function PreviewChain({
           return (
             <React.Fragment key={s.id}>
               {i > 0 && (
-                <ChevronRight className="w-3 h-3 text-white-600 flex-shrink-0" />
+                <ChevronRight className="w-3 h-3 text-muted-foreground/80 flex-shrink-0" />
               )}
               {isJoin && (
                 <span
@@ -2180,9 +2224,10 @@ function useWorkflowExecution(apiUrl: string) {
 
 interface WorkflowBuilderProps {
   apiUrl: string;
+  username?: string | null;
 }
 
-export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
+export default function WorkflowBuilder({ apiUrl, username: _username }: WorkflowBuilderProps) {
   const [activeTab, setActiveTab] = useState<"build" | "run" | "history">(
     () => {
       try {
@@ -2253,13 +2298,50 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
     savePastRunsToStorage(pastRuns);
   }, [pastRuns]);
 
-  // User-saved workflow templates (persisted to localStorage).
+  // User-saved workflow templates (persisted to localStorage + synced to bridge).
   const [customTemplates, setCustomTemplates] = useState<WorkflowTemplate[]>(
     () => loadCustomTemplates(),
   );
   useEffect(() => {
     saveCustomTemplates(customTemplates);
   }, [customTemplates]);
+
+  // On mount: pull server-side workflows and merge with local templates.
+  // Server templates (identified by server_id) take precedence over any
+  // matching local copy so that changes made on other devices are reflected.
+  useEffect(() => {
+    const syncFromServer = async () => {
+      try {
+        const res = await fetch(`${apiUrl}/api/workflows/user`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const list: any[] = Array.isArray(data) ? data : data.workflows ?? [];
+        if (list.length === 0) return;
+        const serverTemplates: WorkflowTemplate[] = list.map((w) => ({
+          id: `server-${w.id}`,
+          server_id: String(w.id),
+          name: w.name,
+          description: w.description || "",
+          inputType: (w.inputType as WorkflowTemplate["inputType"]) || "domains",
+          steps: Array.isArray(w.steps) ? w.steps : [],
+          tags: Array.isArray(w.tags) ? w.tags : [],
+          difficulty: (w.difficulty as WorkflowTemplate["difficulty"]) || "medium",
+          custom: true,
+          createdAt: w.created_at || w.createdAt,
+        }));
+        setCustomTemplates((prev) => {
+          // Keep local-only templates (no server_id); prepend server ones.
+          const localOnly = prev.filter((t) => !t.server_id);
+          return [...serverTemplates, ...localOnly];
+        });
+      } catch {
+        // bridge unreachable — use local templates only
+      }
+    };
+    syncFromServer();
+  }, [apiUrl]);
 
   // "Save as template" modal.
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
@@ -2357,41 +2439,79 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
   };
 
   // Snapshot the current pipeline into a reusable custom template.
-  const saveCurrentAsTemplate = (name: string, description: string) => {
+  const saveCurrentAsTemplate = async (name: string, description: string) => {
     if (steps.length === 0) return;
     const cats: string[] = Array.from(
       new Set(steps.map((s) => s.module.category as string)),
     );
     const difficulty: WorkflowTemplate["difficulty"] =
       steps.length <= 3 ? "easy" : steps.length <= 5 ? "medium" : "advanced";
-    const tpl: WorkflowTemplate = {
+    const tplSteps = steps.map((s) => ({
+      module: s.module.name,
+      customArgs: s.customArgs || undefined,
+      localId: s.id,
+      parentLocalIds: s.parentIds,
+      fleetSize: s.fleetSize,
+    }));
+    const tplName = name.trim() || workflowName.trim() || "Untitled template";
+    const tplDesc = description.trim() || steps.map((s) => s.module.label).join(" → ");
+    let tpl: WorkflowTemplate = {
       id: `custom-${uid()}`,
-      name: name.trim() || workflowName.trim() || "Untitled template",
-      description:
-        description.trim() ||
-        steps.map((s) => s.module.label).join(" → "),
+      name: tplName,
+      description: tplDesc,
       inputType,
       // Preserve full branch structure: localId = builder step id,
       // parentLocalIds = builder parentIds (loadTemplate remaps both).
-      steps: steps.map((s) => ({
-        module: s.module.name,
-        customArgs: s.customArgs || undefined,
-        localId: s.id,
-        parentLocalIds: s.parentIds,
-        fleetSize: s.fleetSize,
-      })),
+      steps: tplSteps,
       tags: cats,
       difficulty,
       custom: true,
       createdAt: new Date().toISOString(),
     };
+
+    // Sync to bridge so it persists per-user across devices.
+    try {
+      const res = await fetch(`${apiUrl}/api/workflows/user`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: tplName,
+          description: tplDesc,
+          steps: tplSteps,
+          inputType,
+          tags: cats,
+          difficulty,
+        }),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        if (saved.id) {
+          tpl = { ...tpl, id: `server-${saved.id}`, server_id: String(saved.id) };
+        }
+      }
+    } catch {
+      // bridge unreachable — store locally only
+    }
+
     setCustomTemplates((prev) => [tpl, ...prev]);
     setShowSaveTemplate(false);
     setSaveTplName("");
     setSaveTplDesc("");
   };
 
-  const deleteCustomTemplate = (id: string) => {
+  const deleteCustomTemplate = async (id: string) => {
+    const tpl = customTemplates.find((t) => t.id === id);
+    if (tpl?.server_id) {
+      try {
+        await fetch(`${apiUrl}/api/workflows/user/${tpl.server_id}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+      } catch {
+        // best-effort — remove locally regardless
+      }
+    }
     setCustomTemplates((prev) => prev.filter((t) => t.id !== id));
   };
 
@@ -2576,7 +2696,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
   return (
     <div className="space-y-5 animate-fade-in">
       {/* ── Page header ── */}
-      <div className="relative overflow-hidden rounded-xl bg-dark-800 border border-dark-700 p-5">
+      <div className="relative overflow-hidden rounded-xl bg-card border border-border p-5">
         <div className="absolute inset-0 bg-gradient-to-br from-primary-500/5 via-transparent to-transparent pointer-events-none" />
         <div className="absolute top-0 right-0 w-64 h-64 bg-primary-500/3 rounded-full -translate-y-1/2 translate-x-1/2 pointer-events-none blur-3xl" />
         <div className="relative flex items-center justify-between gap-4">
@@ -2585,13 +2705,13 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
               <ScanLine className="w-5 h-5 text-primary-400" />
             </div>
             <div>
-              <h1 className="text-base font-bold text-white flex items-center gap-2">
+              <h1 className="text-base font-bold text-foreground flex items-center gap-2">
                 Workflow Builder
                 <span className="text-[10px] font-semibold text-primary-400 bg-primary-500/10 border border-primary-500/30 px-2 py-0.5 rounded-full">
                   BETA
                 </span>
               </h1>
-              <p className="text-[13px] text-white-400 mt-0.5">
+              <p className="text-[13px] text-muted-foreground mt-0.5">
                 Chain scans — each step's output automatically feeds the next
               </p>
             </div>
@@ -2609,12 +2729,12 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
       </div>
 
       {/* ── Tab bar ── */}
-      <div className="flex gap-1 bg-dark-800 border border-dark-700 rounded-xl p-1">
+      <div className="flex gap-1 bg-card border border-border rounded-xl p-1">
         {(["build", "run", "history"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setActiveTab(t)}
-            className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all capitalize ${activeTab === t ? "bg-dark-700 text-white shadow-sm" : "text-white-500 hover:text-white-300"}`}
+            className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all capitalize ${activeTab === t ? "bg-secondary text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground/80"}`}
           >
             {t === "run" && run ? (
               <span className="flex items-center justify-center gap-2">
@@ -2631,14 +2751,14 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
       {activeTab === "build" && (
         <div className="space-y-4">
           {/* Input targets */}
-          <div className="bg-dark-800 rounded-xl border border-dark-700 overflow-hidden">
-            <div className="px-4 py-3 border-b border-dark-700 flex items-center gap-2">
+          <div className="bg-card rounded-xl border border-border overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center gap-2">
               <div
                 className={`w-6 h-6 rounded-lg flex items-center justify-center ${inputMeta.bg} border ${inputMeta.border}`}
               >
                 <InputIcon className={`w-3.5 h-3.5 ${inputMeta.text}`} />
               </div>
-              <span className="text-sm font-semibold text-white">
+              <span className="text-sm font-semibold text-foreground">
                 What are you scanning?
               </span>
             </div>
@@ -2655,7 +2775,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
                         inputType === t
                           ? `${meta.bg} ${meta.border} ${meta.text} shadow-sm`
-                          : "bg-dark-700/50 border-dark-600 text-white-400 hover:border-dark-500 hover:text-white-200"
+                          : "bg-secondary/50 border-border text-muted-foreground hover:border-border hover:text-foreground/90"
                       }`}
                     >
                       <TIcon className="w-3.5 h-3.5" />
@@ -2672,10 +2792,10 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                   onChange={(e) => handleTargetsChange(e.target.value)}
                   placeholder={`Paste ${inputMeta.label.toLowerCase()} here, one per line\n\n${inputMeta.example}`}
                   rows={5}
-                  className={`w-full bg-dark-900 border rounded-xl px-4 py-3 text-sm text-white font-mono placeholder-zinc-700 focus:outline-none resize-none transition-colors ${
+                  className={`w-full bg-background border rounded-xl px-4 py-3 text-sm text-foreground font-mono placeholder-zinc-700 focus:outline-none resize-none transition-colors ${
                     targetCount > 0
                       ? `${inputMeta.border} focus:${inputMeta.border}`
-                      : "border-dark-600 focus:border-primary-500/60"
+                      : "border-border focus:border-primary-500/60"
                   }`}
                 />
                 {targetCount > 0 && (
@@ -2703,11 +2823,11 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
           </div>
 
           {/* Templates */}
-          <div className="bg-dark-800 rounded-xl border border-dark-700 overflow-hidden">
-            <div className="px-4 py-3 border-b border-dark-700 flex items-center justify-between">
+          <div className="bg-card rounded-xl border border-border overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-white-400" />
-                <span className="text-sm font-semibold text-white">
+                <Layers className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-semibold text-foreground">
                   Quick-start templates
                 </span>
               </div>
@@ -2725,7 +2845,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                 ];
                 if (visibleTemplates.length === 0) {
                   return (
-                    <p className="text-white-500 text-sm text-center py-4">
+                    <p className="text-muted-foreground text-sm text-center py-4">
                       No templates for this input type — build a custom pipeline
                       below, then save it with{" "}
                       <span className="text-primary-300 font-semibold">
@@ -2752,7 +2872,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                             if (e.key === "Enter" || e.key === " ")
                               loadTemplate(tpl);
                           }}
-                          className="group relative text-left rounded-xl bg-dark-700/40 border border-dark-600 hover:border-primary-500/40 hover:bg-dark-700 transition-all p-0 overflow-hidden cursor-pointer"
+                          className="group relative text-left rounded-xl bg-secondary/40 border border-border hover:border-primary-500/40 hover:bg-secondary transition-all p-0 overflow-hidden cursor-pointer"
                         >
                           <div
                             className={`h-0.5 w-full ${inputMeta.solid} opacity-50 group-hover:opacity-100 transition-opacity`}
@@ -2764,14 +2884,14 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                                 deleteCustomTemplate(tpl.id);
                               }}
                               title="Delete this saved template"
-                              className="absolute top-2 right-2 z-10 p-1 rounded-md text-white-500 hover:text-red-400 hover:bg-dark-900/70 transition-colors"
+                              className="absolute top-2 right-2 z-10 p-1 rounded-md text-muted-foreground hover:text-red-400 hover:bg-background/70 transition-colors"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           )}
                           <div className="p-3.5">
                             <div className="flex items-start justify-between gap-2 mb-1">
-                              <span className="text-sm font-bold text-white group-hover:text-primary-300 transition-colors leading-tight">
+                              <span className="text-sm font-bold text-foreground group-hover:text-primary-300 transition-colors leading-tight">
                                 {tpl.name}
                               </span>
                               <div className="flex items-center gap-1 flex-shrink-0">
@@ -2788,7 +2908,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                                 </span>
                               </div>
                             </div>
-                            <p className="text-[12px] text-white-400 mb-2.5 leading-snug">
+                            <p className="text-[12px] text-muted-foreground mb-2.5 leading-snug">
                               {tpl.description}
                             </p>
                             <div className="flex items-center gap-1 flex-wrap">
@@ -2803,14 +2923,14 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                                       {m.label}
                                     </span>
                                     {idx < tplModules.length - 1 && (
-                                      <ChevronRight className="w-2.5 h-2.5 text-white-600 flex-shrink-0" />
+                                      <ChevronRight className="w-2.5 h-2.5 text-muted-foreground/80 flex-shrink-0" />
                                     )}
                                   </React.Fragment>
                                 );
                               })}
                             </div>
-                            <div className="mt-2.5 pt-2 border-t border-dark-600/60 flex items-center justify-between text-[11px]">
-                              <span className="text-white-600">
+                            <div className="mt-2.5 pt-2 border-t border-border/60 flex items-center justify-between text-[11px]">
+                              <span className="text-muted-foreground/80">
                                 {tpl.steps.length} steps
                               </span>
                               <span className="text-primary-400 group-hover:translate-x-0.5 transition-transform">
@@ -2828,15 +2948,15 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
           </div>
 
           {/* Pipeline builder */}
-          <div className="bg-dark-800 rounded-xl border border-dark-700 overflow-hidden">
-            <div className="px-4 py-3 border-b border-dark-700 flex items-center justify-between">
+          <div className="bg-card rounded-xl border border-border overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-white-400" />
-                <span className="text-sm font-semibold text-white">
+                <Activity className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-semibold text-foreground">
                   Pipeline
                 </span>
                 {steps.length > 0 && (
-                  <span className="text-[11px] text-white-500">
+                  <span className="text-[11px] text-muted-foreground">
                     {steps.filter((s) => s.enabled).length} / {steps.length}{" "}
                     active
                   </span>
@@ -2850,7 +2970,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                       setSaveTplDesc("");
                       setShowSaveTemplate(true);
                     }}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dark-600 bg-dark-700 text-xs text-white-400 hover:text-cyan-300 hover:border-cyan-500/30 transition-colors"
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-border bg-secondary text-xs text-muted-foreground hover:text-cyan-300 hover:border-cyan-500/30 transition-colors"
                   >
                     <Bookmark className="w-3 h-3" />
                     Save as template
@@ -2859,7 +2979,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                 {steps.length > 0 && (
                   <button
                     onClick={() => setSteps([])}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dark-600 bg-dark-700 text-xs text-white-400 hover:text-red-400 hover:border-red-500/30 transition-colors"
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-border bg-secondary text-xs text-muted-foreground hover:text-red-400 hover:border-red-500/30 transition-colors"
                   >
                     <RotateCcw className="w-3 h-3" />
                     Clear
@@ -2879,15 +2999,15 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
               {steps.length === 0 ? (
                 <div
                   onClick={openRootPicker}
-                  className="py-14 text-center border-2 border-dashed border-dark-600 rounded-xl cursor-pointer hover:border-primary-500/30 transition-all group"
+                  className="py-14 text-center border-2 border-dashed border-border rounded-xl cursor-pointer hover:border-primary-500/30 transition-all group"
                 >
-                  <div className="w-12 h-12 rounded-2xl bg-dark-700 border border-dark-600 mx-auto mb-3 flex items-center justify-center group-hover:border-primary-500/40 transition-colors">
-                    <Plus className="w-5 h-5 text-white-500 group-hover:text-primary-400 transition-colors" />
+                  <div className="w-12 h-12 rounded-2xl bg-secondary border border-border mx-auto mb-3 flex items-center justify-center group-hover:border-primary-500/40 transition-colors">
+                    <Plus className="w-5 h-5 text-muted-foreground group-hover:text-primary-400 transition-colors" />
                   </div>
-                  <p className="text-sm font-semibold text-white-400 group-hover:text-white-300">
+                  <p className="text-sm font-semibold text-muted-foreground group-hover:text-foreground/80">
                     Build your pipeline
                   </p>
-                  <p className="text-xs text-white-600 mt-1">
+                  <p className="text-xs text-muted-foreground/80 mt-1">
                     Pick a template above or click to add steps
                   </p>
                 </div>
@@ -2923,11 +3043,11 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                   />
 
                   <div className="flex items-stretch gap-3 py-0.5">
-                    <div className="w-[3px] ml-5 bg-dark-600 rounded-full" />
+                    <div className="w-[3px] ml-5 bg-accent rounded-full" />
                   </div>
                   <button
                     onClick={openRootPicker}
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-dark-600 text-white-500 hover:border-primary-500/30 hover:text-primary-400 text-xs font-semibold transition-all"
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-border text-muted-foreground hover:border-primary-500/30 hover:text-primary-400 text-xs font-semibold transition-all"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Append step
@@ -2938,17 +3058,17 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
           </div>
 
           {/* Name & launch */}
-          <div className="bg-dark-800 rounded-xl border border-dark-700 p-4 space-y-3">
+          <div className="bg-card rounded-xl border border-border p-4 space-y-3">
             {/* Team selector */}
             <div>
-              <label className="text-xs font-semibold text-white-400 block mb-1.5">
+              <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
                 Project Team{" "}
-                <span className="font-normal text-white-600">(optional)</span>
+                <span className="font-normal text-muted-foreground/80">(optional)</span>
               </label>
               <select
                 value={selectedTeamId}
                 onChange={(e) => setSelectedTeamId(e.target.value)}
-                className="w-full bg-dark-900 border border-dark-600 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-primary-500/60"
+                className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:border-primary-500/60"
               >
                 <option value="">— No team / personal workflow —</option>
                 {teams.map((t) => (
@@ -2960,7 +3080,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
               {selectedTeamId &&
                 teams.find((t) => t.id === selectedTeamId) &&
                 workflowName && (
-                  <p className="text-xs text-white-600 font-mono mt-1">
+                  <p className="text-xs text-muted-foreground/80 font-mono mt-1">
                     Will run as:{" "}
                     <span className="text-primary-400">
                       {teams
@@ -2975,7 +3095,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
             </div>
             <div className="flex flex-wrap gap-3 items-end">
               <div className="flex-1 min-w-[200px]">
-                <label className="text-xs font-semibold text-white-400 block mb-1.5">
+                <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
                   Workflow name
                 </label>
                 <input
@@ -2983,7 +3103,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                   value={workflowName}
                   onChange={(e) => setWorkflowName(e.target.value)}
                   placeholder="e.g. corp-full-recon-2026"
-                  className="w-full bg-dark-900 border border-dark-600 rounded-xl px-3 py-2.5 text-sm text-white font-mono placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 focus:ring-1 focus:ring-primary-500/20"
+                  className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground font-mono placeholder-zinc-700 focus:outline-none focus:border-primary-500/60 focus:ring-1 focus:ring-primary-500/20"
                 />
               </div>
               <button
@@ -2991,8 +3111,8 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                 onClick={() => setShowRunModal(true)}
                 className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${
                   canLaunch && !isRunning
-                    ? "bg-primary-600 hover:bg-primary-500 text-white shadow-lg shadow-primary-500/20 hover:shadow-primary-500/30 hover:scale-[1.02] active:scale-[0.98]"
-                    : "bg-dark-700 text-white-600 cursor-not-allowed border border-dark-600"
+                    ? "bg-primary-600 hover:bg-primary-500 text-foreground shadow-lg shadow-primary-500/20 hover:shadow-primary-500/30 hover:scale-[1.02] active:scale-[0.98]"
+                    : "bg-secondary text-muted-foreground/80 cursor-not-allowed border border-border"
                 }`}
               >
                 <Play className="w-4 h-4" />
@@ -3002,13 +3122,13 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
             {!canLaunch && (
               <div className="mt-2.5 flex flex-wrap gap-2">
                 {!targets.trim() && (
-                  <span className="text-[11px] text-white-500 bg-dark-700 border border-dark-600 px-2.5 py-1 rounded-lg flex items-center gap-1">
+                  <span className="text-[11px] text-muted-foreground bg-secondary border border-border px-2.5 py-1 rounded-lg flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3 text-yellow-500" />
                     No targets
                   </span>
                 )}
                 {!workflowName.trim() && (
-                  <span className="text-[11px] text-white-500 bg-dark-700 border border-dark-600 px-2.5 py-1 rounded-lg flex items-center gap-1">
+                  <span className="text-[11px] text-muted-foreground bg-secondary border border-border px-2.5 py-1 rounded-lg flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3 text-yellow-500" />
                     No name
                   </span>
@@ -3016,7 +3136,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                 {targets.trim() &&
                   workflowName.trim() &&
                   steps.filter((s) => s.enabled).length === 0 && (
-                    <span className="text-[11px] text-white-500 bg-dark-700 border border-dark-600 px-2.5 py-1 rounded-lg flex items-center gap-1">
+                    <span className="text-[11px] text-muted-foreground bg-secondary border border-border px-2.5 py-1 rounded-lg flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3 text-yellow-500" />
                       No active steps
                     </span>
@@ -3032,13 +3152,13 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
         <div className="space-y-4">
           {!run ? (
             <div className="py-20 text-center">
-              <div className="w-14 h-14 rounded-2xl bg-dark-800 border border-dark-700 mx-auto mb-4 flex items-center justify-center">
-                <Activity className="w-6 h-6 text-white-600" />
+              <div className="w-14 h-14 rounded-2xl bg-card border border-border mx-auto mb-4 flex items-center justify-center">
+                <Activity className="w-6 h-6 text-muted-foreground/80" />
               </div>
-              <p className="text-sm font-semibold text-white-400">
+              <p className="text-sm font-semibold text-muted-foreground">
                 No workflow running yet
               </p>
-              <p className="text-xs text-white-600 mt-1">
+              <p className="text-xs text-muted-foreground/80 mt-1">
                 Build your pipeline and hit Run Workflow
               </p>
               <button
@@ -3061,18 +3181,18 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                         ? "border-red-500/30 bg-red-500/5"
                         : run.status === "aborted"
                           ? "border-orange-500/30 bg-orange-500/5"
-                          : "border-dark-700 bg-dark-800"
+                          : "border-border bg-card"
                 }`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2.5 mb-1">
-                      <span className="text-base font-bold text-white">
+                      <span className="text-base font-bold text-foreground">
                         {run.name}
                       </span>
                       <StatusBadge status={run.status as any} />
                     </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-white-500">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       <span>
                         {run.initialTargets.length} targets ·{" "}
                         {INPUT_TYPE_META[run.inputType].label}
@@ -3130,7 +3250,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                         href={`${apiUrl}/api/workflow/${backendRunIdRef.current}/log`}
                         target="_blank"
                         rel="noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-700 border border-dark-600 text-white-300 hover:text-white rounded-xl text-xs font-semibold transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary border border-border text-foreground/80 hover:text-foreground rounded-xl text-xs font-semibold transition-colors"
                         title="Open verbose runner log in a new tab"
                       >
                         <FileText className="w-3.5 h-3.5" />
@@ -3143,7 +3263,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                           reset();
                           setActiveTab("build");
                         }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-700 border border-dark-600 text-white-300 hover:text-white rounded-xl text-xs font-semibold transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary border border-border text-foreground/80 hover:text-foreground rounded-xl text-xs font-semibold transition-colors"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         New workflow
@@ -3152,7 +3272,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                   </div>
                 </div>
                 {(run.status === "running" || run.status === "completed") && (
-                  <div className="mt-3 h-1.5 bg-dark-700 rounded-full overflow-hidden">
+                  <div className="mt-3 h-1.5 bg-secondary rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-700 ${run.status === "completed" ? "bg-emerald-500" : "bg-primary-500"}`}
                       style={{
@@ -3211,13 +3331,13 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
         <div className="space-y-2">
           {pastRuns.length === 0 ? (
             <div className="py-20 text-center">
-              <div className="w-14 h-14 rounded-2xl bg-dark-800 border border-dark-700 mx-auto mb-4 flex items-center justify-center">
-                <Clock className="w-6 h-6 text-white-600" />
+              <div className="w-14 h-14 rounded-2xl bg-card border border-border mx-auto mb-4 flex items-center justify-center">
+                <Clock className="w-6 h-6 text-muted-foreground/80" />
               </div>
-              <p className="text-sm font-semibold text-white-400">
+              <p className="text-sm font-semibold text-muted-foreground">
                 No past runs yet
               </p>
-              <p className="text-xs text-white-600 mt-1">
+              <p className="text-xs text-muted-foreground/80 mt-1">
                 Completed workflows will appear here
               </p>
             </div>
@@ -3228,13 +3348,13 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
               return (
                 <div
                   key={r.id}
-                  className="bg-dark-800 rounded-xl border border-dark-700 hover:border-dark-600 overflow-hidden transition-colors cursor-pointer"
+                  className="bg-card rounded-xl border border-border hover:border-border overflow-hidden transition-colors cursor-pointer"
                   onClick={() => setSelectedPastRun(expanded ? null : r)}
                 >
                   <div className="px-4 py-3 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <StatusBadge status={r.status as any} />
-                      <span className="text-sm font-bold text-white truncate">
+                      <span className="text-sm font-bold text-foreground truncate">
                         {r.name}
                       </span>
                       <span
@@ -3243,7 +3363,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                         {rMeta.label}
                       </span>
                     </div>
-                    <div className="flex items-center gap-3 flex-shrink-0 text-xs text-white-500">
+                    <div className="flex items-center gap-3 flex-shrink-0 text-xs text-muted-foreground">
                       <span>
                         {r.steps.filter((s) => s.enabled).length} steps
                       </span>
@@ -3260,7 +3380,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                     </div>
                   </div>
                   {expanded && (
-                    <div className="border-t border-dark-700 px-4 py-3 bg-dark-900/40 space-y-2">
+                    <div className="border-t border-border px-4 py-3 bg-background/40 space-y-2">
                       {r.steps.map((step) => {
                         const SIcon = step.module.Icon;
                         return (
@@ -3330,17 +3450,17 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
       {/* Save-as-template modal */}
       {showSaveTemplate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-md shadow-2xl ring-1 ring-white/5 overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-dark-700">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl ring-1 ring-foreground/5 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30">
                   <Bookmark className="w-4 h-4 text-cyan-400" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">
+                  <h3 className="text-sm font-bold text-foreground">
                     Save as template
                   </h3>
-                  <p className="text-[11px] text-white-500 mt-0.5">
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
                     {steps.length} step{steps.length === 1 ? "" : "s"} ·{" "}
                     {inputMeta.label} input · saved to this browser
                   </p>
@@ -3348,14 +3468,14 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
               </div>
               <button
                 onClick={() => setShowSaveTemplate(false)}
-                className="p-1.5 rounded-lg text-white-400 hover:text-white hover:bg-dark-700 transition-colors"
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-[11px] font-semibold text-white-400 mb-1.5 uppercase tracking-wider">
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
                   Template name
                 </label>
                 <input
@@ -3364,13 +3484,13 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                   value={saveTplName}
                   onChange={(e) => setSaveTplName(e.target.value)}
                   placeholder="e.g. My domain recon"
-                  className="w-full bg-dark-900 border border-dark-600 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/20"
+                  className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm text-foreground placeholder-zinc-600 focus:outline-none focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/20"
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-semibold text-white-400 mb-1.5 uppercase tracking-wider">
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
                   Description{" "}
-                  <span className="text-white-600 normal-case font-normal">
+                  <span className="text-muted-foreground/80 normal-case font-normal">
                     (optional)
                   </span>
                 </label>
@@ -3379,14 +3499,14 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                   value={saveTplDesc}
                   onChange={(e) => setSaveTplDesc(e.target.value)}
                   placeholder={steps.map((s) => s.module.label).join(" → ")}
-                  className="w-full bg-dark-900 border border-dark-600 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/20"
+                  className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm text-foreground placeholder-zinc-600 focus:outline-none focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/20"
                 />
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-dark-700">
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">
               <button
                 onClick={() => setShowSaveTemplate(false)}
-                className="px-3 py-2 rounded-xl border border-dark-600 bg-dark-700 text-xs font-semibold text-white-400 hover:text-white transition-colors"
+                className="px-3 py-2 rounded-xl border border-border bg-secondary text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
               >
                 Cancel
               </button>
@@ -3405,24 +3525,24 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
       {/* Run confirmation modal */}
       {showRunModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-md shadow-2xl ring-1 ring-white/5 overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-dark-700">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl ring-1 ring-foreground/5 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-primary-500/15 border border-primary-500/30">
                   <Play className="w-4 h-4 text-primary-400" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">
+                  <h3 className="text-sm font-bold text-foreground">
                     Ready to launch
                   </h3>
-                  <p className="text-[11px] text-white-500 mt-0.5">
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
                     {workflowName}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowRunModal(false)}
-                className="p-1.5 rounded-lg text-white-500 hover:text-white hover:bg-dark-700 transition-colors"
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3450,12 +3570,12 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                 ].map((item) => (
                   <div
                     key={item.label}
-                    className="bg-dark-900/60 rounded-xl border border-dark-700 p-3 text-center"
+                    className="bg-background/60 rounded-xl border border-border p-3 text-center"
                   >
                     <div className={`text-lg font-bold ${item.color}`}>
                       {item.value}
                     </div>
-                    <div className="text-[11px] text-white-500 mt-0.5">
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
                       {item.label}
                     </div>
                   </div>
@@ -3464,7 +3584,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
 
               {/* Pipeline preview */}
               <div>
-                <p className="text-[11px] font-semibold text-white-500 mb-2 uppercase tracking-wider">
+                <p className="text-[11px] font-semibold text-muted-foreground mb-2 uppercase tracking-wider">
                   Execution order
                 </p>
                 <PipelinePreview steps={steps} inputMeta={inputMeta} />
@@ -3472,7 +3592,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
 
               {/* Fleet options */}
               <div>
-                <p className="text-[11px] font-semibold text-white-500 mb-2 uppercase tracking-wider">
+                <p className="text-[11px] font-semibold text-muted-foreground mb-2 uppercase tracking-wider">
                   Fleet sizing
                 </p>
                 <div className="flex gap-2">
@@ -3481,10 +3601,10 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                     value={runFleetPrefix}
                     onChange={(e) => setRunFleetPrefix(e.target.value)}
                     placeholder="Fleet prefix (optional, e.g. recon)"
-                    className="flex-1 bg-dark-900 border border-dark-600 rounded-xl px-3 py-2 text-xs text-white font-mono placeholder-zinc-700 focus:outline-none focus:border-primary-500/60"
+                    className="flex-1 bg-background border border-border rounded-xl px-3 py-2 text-xs text-foreground font-mono placeholder-zinc-700 focus:outline-none focus:border-primary-500/60"
                   />
                   <div className="flex flex-col">
-                    <span className="text-[9px] text-white-600 font-mono uppercase tracking-wider mb-0.5">
+                    <span className="text-[9px] text-muted-foreground/80 font-mono uppercase tracking-wider mb-0.5">
                       min
                     </span>
                     <input
@@ -3492,11 +3612,11 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                       value={minInstances}
                       onChange={(e) => setMinInstances(e.target.value)}
                       min={1}
-                      className="w-20 bg-dark-900 border border-dark-600 rounded-xl px-3 py-2 text-xs text-white font-mono placeholder-zinc-700 focus:outline-none focus:border-primary-500/60"
+                      className="w-20 bg-background border border-border rounded-xl px-3 py-2 text-xs text-foreground font-mono placeholder-zinc-700 focus:outline-none focus:border-primary-500/60"
                     />
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-[9px] text-white-600 font-mono uppercase tracking-wider mb-0.5">
+                    <span className="text-[9px] text-muted-foreground/80 font-mono uppercase tracking-wider mb-0.5">
                       max
                     </span>
                     <input
@@ -3504,15 +3624,15 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                       value={maxInstances}
                       onChange={(e) => setMaxInstances(e.target.value)}
                       min={1}
-                      className="w-20 bg-dark-900 border border-dark-600 rounded-xl px-3 py-2 text-xs text-white font-mono placeholder-zinc-700 focus:outline-none focus:border-primary-500/60"
+                      className="w-20 bg-background border border-border rounded-xl px-3 py-2 text-xs text-foreground font-mono placeholder-zinc-700 focus:outline-none focus:border-primary-500/60"
                     />
                   </div>
                 </div>
-                <p className="text-[10px] text-white-600 mt-1.5">
+                <p className="text-[10px] text-muted-foreground/80 mt-1.5">
                   Light modules use{" "}
-                  <span className="text-white-400 font-mono">min</span>, heavy
+                  <span className="text-muted-foreground font-mono">min</span>, heavy
                   modules use{" "}
-                  <span className="text-white-400 font-mono">max</span>. Each
+                  <span className="text-muted-foreground font-mono">max</span>. Each
                   step can override on its card (w1=light → w5=demanding).
                 </p>
                 {/* Auto-terminate toggle */}
@@ -3520,7 +3640,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                   <div
                     onClick={() => setAutoTerminateFleet((v) => !v)}
                     className={`w-8 h-4 rounded-full transition-colors ${
-                      autoTerminateFleet ? "bg-primary-500" : "bg-dark-600"
+                      autoTerminateFleet ? "bg-primary-500" : "bg-accent"
                     }`}
                   >
                     <div
@@ -3531,7 +3651,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                       }`}
                     />
                   </div>
-                  <span className="text-xs text-white-400 group-hover:text-white-200 transition-colors">
+                  <span className="text-xs text-muted-foreground group-hover:text-foreground/90 transition-colors">
                     Auto-terminate idle instances after each step
                   </span>
                 </label>
@@ -3566,7 +3686,7 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
                           >
                             <SIcon className="w-2.5 h-2.5" />
                             {s.module.label}
-                            <span className="text-white-300/80 font-mono">
+                            <span className="text-foreground/70 font-mono">
                               ×{n}
                             </span>
                             {s.fleetSize !== undefined && (
@@ -3586,16 +3706,16 @@ export default function WorkflowBuilder({ apiUrl }: WorkflowBuilderProps) {
               </div>
             </div>
 
-            <div className="px-5 py-3 border-t border-dark-700 flex gap-2 justify-end bg-dark-900/40">
+            <div className="px-5 py-3 border-t border-border flex gap-2 justify-end bg-background/40">
               <button
                 onClick={() => setShowRunModal(false)}
-                className="px-4 py-2 bg-dark-700 hover:bg-dark-600 text-white-300 hover:text-white rounded-xl text-sm font-semibold transition-colors"
+                className="px-4 py-2 bg-secondary hover:bg-accent text-foreground/80 hover:text-foreground rounded-xl text-sm font-semibold transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleLaunch}
-                className="px-6 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-bold transition-all hover:shadow-lg hover:shadow-primary-500/20 flex items-center gap-2"
+                className="px-6 py-2 bg-primary-600 hover:bg-primary-500 text-foreground rounded-xl text-sm font-bold transition-all hover:shadow-lg hover:shadow-primary-500/20 flex items-center gap-2"
               >
                 <Play className="w-4 h-4" />
                 Launch

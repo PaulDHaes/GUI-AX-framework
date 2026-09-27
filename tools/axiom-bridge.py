@@ -209,17 +209,27 @@ def classify_by_filename(filename):
     name_without_ext = ".".join(filename.split(".")[:-1])
 
     # Extract module name: handle axiom output formats like
-    #   amass-out.txt       -> amass
-    #   dnsx-out-full-2.txt -> dnsx
-    #   httpx+01-16_09-39-08 -> httpx
-    if "-" in name_without_ext:
+    #   amass-out.txt              -> amass
+    #   dnsx-out-full-2.txt        -> dnsx
+    #   httpx+01-16_09-39-08       -> httpx (single module)
+    #   httpx+nuclei+09-05_14-50   -> nuclei (multi-module: use LAST module)
+    #
+    # For bridge multi-module filenames (module1+module2+timestamp), split on "+"
+    # and collect non-timestamp parts.  The last module in the chain is the one
+    # whose output format ends up in the file (modules pipe into each other).
+    if "+" in name_without_ext:
+        plus_parts = name_without_ext.split("+")
+        # A timestamp part looks like "09-05_14-50-33-606960" (digits + dashes)
+        import re as _re
+        module_parts = [
+            p for p in plus_parts
+            if p and not _re.match(r'^\d', p)
+        ]
+        module = module_parts[-1].lower() if module_parts else plus_parts[0].lower()
+    elif "-" in name_without_ext:
         module = name_without_ext.split("-")[0].lower()
     else:
         module = name_without_ext.lower()
-
-    # Strip +timestamp suffix (axiom scan format)
-    if "+" in module:
-        module = module.split("+")[0]
 
     # Strip trailing digits
     import re
@@ -585,10 +595,30 @@ def process_import_file(filepath, scanner_type=None, skip_move=False):
         except Exception:
             pass
         scan_name = _parent  # unique ID = bundle folder name (e.g. "gowitness-03-14_15-04-01")
-    elif '-' in filename:
-        scan_name = filename.split('-')[0]
     else:
-        scan_name = filename.split('.')[0]
+        # For axiom-generated output files (stem = bridge scan_id like
+        # "httpx+nuclei+09-05_14-50-33-606960"), look up the human-readable
+        # name in SCANS_STORE first so targets get the correct programName
+        # (e.g. "gw-acme-5") and the project filter can match them.
+        file_stem = filename.rsplit('.', 1)[0]
+        try:
+            with open(SCANS_STORE, "r") as _sf:
+                _stored_scans = json.load(_sf)
+            _id_to_name = {
+                s["id"]: s.get("name", "")
+                for s in _stored_scans
+                if s.get("id") and s.get("name")
+            }
+            _looked_up = _id_to_name.get(file_stem, "")
+        except Exception:
+            _looked_up = ""
+
+        if _looked_up:
+            scan_name = _looked_up
+        elif '-' in filename:
+            scan_name = filename.split('-')[0]
+        else:
+            scan_name = file_stem
     print(f"[DEBUG] Extracted scan_name: {scan_name}")
     
     # ── Dispatch to modular importer ─────────────────────────────────────────
@@ -750,11 +780,20 @@ def _require_auth():
     path = request.path
     if path.startswith("/api/auth/"):
         return  # login / logout / status are always public
+    # Screenshot images are served via <img> tags which can't send auth headers
+    if path.startswith("/api/screenshots/") or path.startswith("/api/gowitness-bundle/"):
+        return
     if not path.startswith("/api/"):
         return  # static files, /, /health
     token = _token_from_request()
-    if token and token in _active_tokens:
-        return  # valid token
+    if not token:
+        return jsonify({"error": "unauthorized", "authRequired": True}), 401
+    # Static env-var token is always valid (survives restarts without re-login)
+    static = os.environ.get("GUI_AX_STATIC_TOKEN", "")
+    if static and secrets.compare_digest(token, static):
+        return  # static token always passes
+    if token in _active_tokens:
+        return  # dynamic login / generated token
     return jsonify({"error": "unauthorized", "authRequired": True}), 401
 
 
@@ -764,6 +803,10 @@ def auth_status():
     if not AUTH_PASSWORD:
         return jsonify({"authRequired": False, "authenticated": True, "username": None, "role": None})
     token = _token_from_request()
+    # Static env-var token is always authenticated as admin
+    _static = os.environ.get("GUI_AX_STATIC_TOKEN", "")
+    if _static and token and secrets.compare_digest(token, _static):
+        return jsonify({"authRequired": True, "authenticated": True, "username": AUTH_USERNAME, "role": "admin", "projects": None})
     is_auth = bool(token and token in _active_tokens)
 
     if not is_auth:
@@ -776,11 +819,15 @@ def auth_status():
         None,
     )
     if user:
+        role = user.get("role", "user")
+        # Admin gets null (all projects); regular users get their project list
+        projects = None if role == "admin" else user.get("projects", [])
         return jsonify({
             "authRequired":  True,
             "authenticated": True,
             "username":      user["username"],
-            "role":          user.get("role", "user"),
+            "role":          role,
+            "projects":      projects,
         })
 
     # Legacy single-user mode (store has no user records yet)
@@ -789,6 +836,7 @@ def auth_status():
         "authenticated": True,
         "username":      AUTH_USERNAME,
         "role":          "admin",
+        "projects":      None,
     })
 
 
@@ -816,7 +864,15 @@ def auth_login():
             matched["lastLogin"] = datetime.now(timezone.utc).isoformat()
             store["users"] = users
             save_store(store)
-            return jsonify({"ok": True, "token": token})
+            role     = matched.get("role", "user")
+            projects = None if role == "admin" else matched.get("projects", [])
+            return jsonify({
+                "ok":       True,
+                "token":    token,
+                "username": matched["username"],
+                "role":     role,
+                "projects": projects,
+            })
         return jsonify({"error": "Invalid username or password"}), 401
 
     # ── Legacy single-user env-var fallback ───────────────────────────────
@@ -826,7 +882,7 @@ def auth_login():
     if username_ok and password_ok:
         token = secrets.token_hex(32)
         _active_tokens.add(token)
-        return jsonify({"ok": True, "token": token})
+        return jsonify({"ok": True, "token": token, "username": AUTH_USERNAME, "role": "admin", "projects": None})
 
     return jsonify({"error": "Invalid username or password"}), 401
 
@@ -862,26 +918,123 @@ def get_axiom_config():
     return jsonify(result)
 
 
+def _get_linked_scan_names(project_token: str) -> set:
+    """Return the set of programNames linked to a project (case-insensitive)."""
+    projects = load_projects()
+    proj = projects.get(project_token)
+    if not proj:
+        return set()
+    return {n.lower() for n in proj.get("linked_scans", []) if n}
+
+
 @app.route("/api/targets", methods=["GET"])
 def get_targets():
     store = load_store()
-    return jsonify(store.get("targets", []))
+    all_targets = store.get("targets", [])
+    project_token = request.args.get("projectToken", "").strip()
+    if project_token:
+        linked = _get_linked_scan_names(project_token)
+        if linked:
+            all_targets = [
+                t for t in all_targets
+                if (t.get("programName") or "").lower() in linked
+            ]
+        else:
+            all_targets = []
+    return jsonify(all_targets)
 
 
 @app.route("/api/screenshots/<path:rel>")
 def serve_screenshot(rel):
     """Serve screenshot images stored in processed/gowitness-* bundles.
-    rel = gowitness-TS/screenshots/filename.jpeg
+
+    Handles both formats produced by the importer:
+      DB-based:   gowitness-TS/screenshots/filename.jpeg
+      JPEG-only:  gowitness-TS/filename.jpeg  (no screenshots/ subdir)
+
+    Also tries PNG variant when a .jpeg path is not found (newer gowitness
+    versions produce PNG instead of JPEG).
     """
+    processed_root = os.path.realpath(PROCESSED_PATH)
     full_path = os.path.realpath(os.path.join(PROCESSED_PATH, rel))
-    # Security: must stay inside PROCESSED_PATH
-    if not full_path.startswith(os.path.realpath(PROCESSED_PATH)):
+    if not full_path.startswith(processed_root):
         abort(403)
-    if not os.path.isfile(full_path):
-        print(f"[gw] Screenshot 404: {full_path}")
-        abort(404)
-    print(f"[gw] Serving screenshot: {full_path}")
-    return send_file(full_path, mimetype="image/jpeg")
+
+    candidates = [full_path]
+    base, ext = os.path.splitext(full_path)
+    if ext.lower() in (".jpeg", ".jpg"):
+        candidates.append(base + ".png")
+    elif ext.lower() == ".png":
+        candidates.extend([base + ".jpeg", base + ".jpg"])
+
+    # Also try without the `screenshots/` subdirectory in case the bundle
+    # stores images flat (JPEG-only import path).
+    for c in list(candidates):
+        flat = c.replace(os.sep + "screenshots" + os.sep, os.sep)
+        if flat != c:
+            candidates.append(flat)
+
+    for candidate in candidates:
+        candidate = os.path.realpath(candidate)
+        if not candidate.startswith(processed_root):
+            continue
+        if os.path.isfile(candidate):
+            ext_lc = os.path.splitext(candidate)[1].lower()
+            mime = "image/png" if ext_lc == ".png" else "image/jpeg"
+            print(f"[gw] Serving screenshot: {candidate}")
+            return send_file(candidate, mimetype=mime)
+
+    # Bundle path not found — search all gowitness bundles for a screenshot
+    # matching the same hostname. Handles the case where the original bundle
+    # was deleted or gowitness changed its filename format between runs.
+    # Hostname extraction: "http---hostname-443.jpeg" or "https:__hostname.png"
+    import re as _re
+    fname_only = os.path.basename(full_path)
+    fname_stem = os.path.splitext(fname_only)[0]
+
+    # Try to extract hostname from known gowitness filename formats
+    _hostname = None
+    _m = _re.match(r"^https?---(.+?)-\d+$", fname_stem)
+    if _m:
+        _hostname = _m.group(1)
+    else:
+        _m2 = _re.match(r"^https?---(.+)$", fname_stem)
+        if _m2:
+            _hostname = _m2.group(1)
+        else:
+            _m3 = _re.match(r"^https?[:_]{1,2}[_]{1,2}(.+)$", fname_stem, _re.I)
+            if _m3:
+                _hostname = _m3.group(1)
+
+    try:
+        bundles = sorted(
+            [d for d in os.listdir(PROCESSED_PATH)
+             if d.startswith("gowitness-") and os.path.isdir(os.path.join(PROCESSED_PATH, d))],
+            reverse=True  # newest first
+        )
+        image_exts = {".jpeg", ".jpg", ".png"}
+        for bundle in bundles:
+            for sub in ("", "screenshots"):
+                bd = os.path.join(PROCESSED_PATH, bundle, sub) if sub else os.path.join(PROCESSED_PATH, bundle)
+                if not os.path.isdir(bd):
+                    continue
+                for f in os.listdir(bd):
+                    fbase = os.path.splitext(f)[0]
+                    if os.path.splitext(f)[1].lower() not in image_exts:
+                        continue
+                    # Match by exact filename (same format) or by hostname substring
+                    if fbase == fname_stem or (_hostname and _hostname in fbase):
+                        p = os.path.realpath(os.path.join(bd, f))
+                        if p.startswith(processed_root) and os.path.isfile(p):
+                            ext_lc = os.path.splitext(p)[1].lower()
+                            mime = "image/png" if ext_lc == ".png" else "image/jpeg"
+                            print(f"[gw] Serving screenshot (fallback {bundle}): {p}")
+                            return send_file(p, mimetype=mime)
+    except Exception:
+        pass
+
+    print(f"[gw] Screenshot 404: {full_path}")
+    abort(404)
 
 
 @app.route("/api/gowitness-bundle/<bundle_name>/zip")
@@ -1493,13 +1646,20 @@ def _read_logs_for_failure_check(path, max_lines=500):
     return lines
 
 def load_scans_from_stats_log():
-    """Load scan history from ~/.axiom/stats.log"""
-    scans = []
-    stats_log_path = os.path.expanduser("~/.axiom/stats.log")
+    """Load scan history from ~/.axiom/stats.log
 
+    Multi-module scans (e.g. axiom-scan -m httpx -m nuclei) produce one stats.log
+    entry per module, each pointing to the same output file. We group by the output
+    filename — which encodes our bridge scan_id — so they collapse into one record.
+    """
+    stats_log_path = os.path.expanduser("~/.axiom/stats.log")
     if not os.path.exists(stats_log_path):
         print(f"[scans] stats.log not found at {stats_log_path}")
-        return scans
+        return []
+
+    # Ordered dict: bridge_id → merged scan_obj
+    by_bridge_id = {}
+    bridge_id_order = []
 
     try:
         with open(stats_log_path, "r") as f:
@@ -1515,28 +1675,49 @@ def load_scans_from_stats_log():
 
                 entry = json.loads(line)
 
-                # "scan" key → actual scan record
                 if "scan" in entry and isinstance(entry["scan"], dict):
                     for module_name, scan_data in entry["scan"].items():
-                        scan_id = scan_data.get("id", f"{module_name}-unknown")
-                        scan_obj = {
-                            "id": scan_id,
-                            "name": scan_id,
-                            "module": module_name,
-                            "status": scan_data.get("status", "completed"),
-                            "date": scan_data.get("date", ""),
-                            "instances": int(scan_data.get("instances", 0)),
-                            "targets": int(scan_data.get("targets", 0)),
-                            "results": int(scan_data.get("results", 0)),
-                            "runtime": scan_data.get("runtime", ""),
-                            "command": scan_data.get("command", ""),
-                            "threads": int(scan_data.get("threads", 0)),
-                            "local_logs": scan_data.get("local_logs", ""),
-                            "remote_logs": scan_data.get("remote_logs", ""),
-                            "output": scan_data.get("output", ""),
-                            "extra_args": scan_data.get("extra_args", ""),
-                        }
-                        # If 0 results, check local logs for known failure patterns
+                        axiom_id = scan_data.get("id", f"{module_name}-unknown")
+                        output_path = scan_data.get("output", "")
+                        # The output filename encodes our bridge scan_id; use it as
+                        # the dedup key so multi-module entries collapse into one record.
+                        if output_path:
+                            bridge_id = os.path.splitext(os.path.basename(output_path))[0]
+                        else:
+                            bridge_id = axiom_id
+
+                        if bridge_id not in by_bridge_id:
+                            bridge_id_order.append(bridge_id)
+                            scan_obj = {
+                                "id": bridge_id,
+                                "name": bridge_id,
+                                "module": module_name,
+                                "status": scan_data.get("status", "completed"),
+                                "date": scan_data.get("date", ""),
+                                "instances": int(scan_data.get("instances", 0)),
+                                "targets": int(scan_data.get("targets", 0)),
+                                "results": int(scan_data.get("results", 0)),
+                                "runtime": scan_data.get("runtime", ""),
+                                "command": scan_data.get("command", ""),
+                                "threads": int(scan_data.get("threads", 0)),
+                                "local_logs": scan_data.get("local_logs", ""),
+                                "remote_logs": scan_data.get("remote_logs", ""),
+                                "output": output_path,
+                                "extra_args": scan_data.get("extra_args", ""),
+                            }
+                            by_bridge_id[bridge_id] = scan_obj
+                        else:
+                            # Merge additional module into the existing record
+                            existing = by_bridge_id[bridge_id]
+                            existing_mods = [m.strip() for m in existing["module"].split(",")]
+                            if module_name not in existing_mods:
+                                existing_mods.append(module_name)
+                                existing["module"] = ", ".join(existing_mods)
+                            existing["results"] = max(existing["results"], int(scan_data.get("results", 0)))
+                            existing["targets"] = max(existing["targets"], int(scan_data.get("targets", 0)))
+
+                        # Failure detection for zero-result scans
+                        scan_obj = by_bridge_id[bridge_id]
                         if scan_obj["results"] == 0 and scan_obj.get("local_logs"):
                             _log_lines = _read_logs_for_failure_check(scan_obj["local_logs"])
                             if _log_lines:
@@ -1545,11 +1726,9 @@ def load_scans_from_stats_log():
                                     scan_obj["status"] = "failed"
                                     scan_obj["failure_reason"] = _reason
                                     scan_obj["failure_lines"] = _fail_lines
-                                    print(f"[scans] Marking {scan_id} as FAILED: {_reason}")
-                        scans.append(scan_obj)
+                                    print(f"[scans] Marking {bridge_id} as FAILED: {_reason}")
 
                 elif not known_non_scan_keys.issuperset(entry.keys()):
-                    # Only warn for truly unexpected entry shapes
                     print(f"[scans] Line {line_num}: Unrecognised entry keys: {list(entry.keys())}")
 
             except json.JSONDecodeError as e:
@@ -1557,11 +1736,13 @@ def load_scans_from_stats_log():
             except Exception as e:
                 print(f"[scans] Line {line_num}: Error processing: {e}")
 
+        scans = [by_bridge_id[bid] for bid in bridge_id_order]
         print(f"[scans] Loaded {len(scans)} scans from stats.log ({len(lines)} lines)")
     except Exception as e:
         print(f"[scans] Failed to read stats.log: {e}")
         import traceback
         traceback.print_exc()
+        scans = []
 
     return scans
 
@@ -1626,6 +1807,10 @@ def load_scans():
     stats.log only contains scans after axiom-scan finishes writing to it, so
     just-launched / in-flight scans need to come from SCANS_STORE. We dedupe by
     id/name (stats.log entry wins for completed scans).
+
+    stats.log entries set name=id (the raw scan ID), losing the human-readable
+    label (e.g. "gw-nike-5") stored in SCANS_STORE. We restore it so the
+    project filter in the UI (which matches on name prefix) can still find them.
     """
     stats_scans = []
     try:
@@ -1643,15 +1828,28 @@ def load_scans():
     if not stats_scans and not store_scans:
         return []
 
-    # Dedupe — prefer stats.log entry (it has runtime/results/etc.)
+    # Build id → human-readable name from SCANS_STORE so we can restore labels
+    # that stats.log drops (it uses the raw scan ID as name).
+    store_name_by_id = {
+        s["id"]: s["name"]
+        for s in store_scans
+        if s.get("id") and s.get("name") and s["id"] != s["name"]
+    }
+
+    # Dedupe — prefer stats.log entry (it has runtime/results/etc.), but
+    # restore the label name from SCANS_STORE if stats.log only has the raw ID.
     seen = set()
     merged = []
     for s in stats_scans:
         sid = s.get("id") or s.get("name")
         if sid:
             seen.add(sid)
+        # stats.log sets name == id; restore human-readable label if available
+        if s.get("name") == s.get("id") and sid in store_name_by_id:
+            s = {**s, "name": store_name_by_id[sid]}
         merged.append(s)
 
+    store_changed = False
     for s in store_scans:
         sid = s.get("id") or s.get("name")
         if sid and sid not in seen:
@@ -1660,8 +1858,27 @@ def load_scans():
                 s["status"] = "running"
             # Reconcile against the wrapper log so a scan that already finished
             # or died (before landing in stats.log) doesn't linger as 'running'.
-            s = _resolve_inflight_status(s)
+            resolved = _resolve_inflight_status(s)
+            if resolved.get("status") != s.get("status"):
+                # Status changed — write back so it doesn't linger as 'running'
+                store_changed = True
+                s = resolved
             merged.append(s)
+
+    if store_changed:
+        # Persist only the store entries (not stats.log-sourced ones)
+        updated_store = [s for s in merged if s.get("id") not in
+                         {ss.get("id") for ss in stats_scans}]
+        # Keep any store entries that were deduped out too
+        all_store_ids = {s.get("id") or s.get("name") for s in updated_store}
+        for s in store_scans:
+            sid = s.get("id") or s.get("name")
+            if sid and sid not in all_store_ids:
+                updated_store.append(s)
+        try:
+            save_scans(updated_store)
+        except Exception:
+            pass
 
     return merged
 
@@ -1718,10 +1935,15 @@ def patch_gowitness_names():
 
 def sanitize_domain(target: str) -> str:
     """Sanitize a single target string (domain, IP, CIDR, or URL).
-    Strips whitespace and removes characters that are unsafe in shell contexts.
+    Strips HTML tags (Ghostwriter rich-text scopes wrap lines in <p> tags),
+    then removes characters that are unsafe in shell contexts.
     Returns an empty string if the target is clearly invalid.
     """
     target = target.strip()
+    if not target:
+        return ""
+    # Strip HTML tags before any other processing
+    target = re.sub(r"<[^>]+>", "", target).strip()
     if not target:
         return ""
     # Remove shell-unsafe characters (keep alphanumerics, dots, dashes, slashes,
@@ -1752,6 +1974,178 @@ def get_modules():
         available = [f"{t}.json" for t in dict.fromkeys(fallback_tools)]
 
     return jsonify({"modules": available})
+
+
+def _build_scan_shell(cmd_str: str, targets_file: str, output_file_abs: str, log_file: str) -> str:
+    """Return the zsh shell script that wraps one axiom-scan invocation in a tmux session."""
+    return f'''zsh -l -c '
+        echo "=== Axiom Scan Starting ===" | tee {log_file}
+        echo "Time: $(date)" | tee -a {log_file}
+        echo "Command: {cmd_str}" | tee -a {log_file}
+        echo "=========================" | tee -a {log_file}
+        echo "" | tee -a {log_file}
+        if [ -f "{targets_file}" ]; then
+            echo "✓ Input: $(wc -l < "{targets_file}") targets" | tee -a {log_file}
+        else
+            echo "✗ ERROR: Input file missing!" | tee -a {log_file}
+            exit 1
+        fi
+        echo "" | tee -a {log_file}
+        echo "=== Waiting 10s for instances to initialise... ===" | tee -a {log_file}
+        sleep 10
+        echo "=== Running Scan ===" | tee -a {log_file}
+        {cmd_str} 2>&1 | tee -a {log_file}
+        EXIT_CODE=$?
+        echo "" | tee -a {log_file}
+        echo "=== Scan Completed (exit $EXIT_CODE) ===" | tee -a {log_file}
+        if [ -f "{output_file_abs}" ]; then
+            echo "✓ Output: $(wc -l < "{output_file_abs}") lines saved to {output_file_abs}" | tee -a {log_file}
+        elif [ -d "{output_file_abs}" ]; then
+            echo "✓ Output dir: $(ls -1 "{output_file_abs}" | wc -l) files" | tee -a {log_file}
+        else
+            echo "✗ Output not found at {output_file_abs}" | tee -a {log_file}
+        fi
+        echo "Keeping terminal open 60s..." | tee -a {log_file}
+        sleep 60
+    \''''
+
+
+def _launch_split_mode(scan_name, targets, module_list, fleet_control, options, deployed_fleet_name):
+    """Split mode: one axiom-scan per module, each on dedicated instance(s).
+
+    Unlike the default chained mode (where modules pipe into each other and share
+    all fleet instances), split mode gives every module its own instance(s) and
+    feeds all modules the original raw target list independently.
+
+    Fleet size is divided equally: fleet_size=4 with 2 modules → 2 instances each.
+    """
+    spinup = int(fleet_control.get("spinup") or 0)
+    instances_per_module = max(1, spinup // len(module_list)) if spinup else 0
+
+    # Sanitize targets once; reuse the same list for all modules
+    target_lines = []
+    for t in targets:
+        if isinstance(t, dict):
+            target_str = (t.get("hostname") or t.get("domain") or t.get("host")
+                          or t.get("target") or t.get("url") or t.get("ip") or str(t))
+        else:
+            target_str = str(t)
+        target_str = sanitize_domain(target_str)
+        if target_str:
+            target_lines.append(target_str)
+
+    if not target_lines:
+        return jsonify({"error": "No valid targets provided"}), 400
+
+    try:
+        with open(SCANS_STORE, "r") as f:
+            scans = json.load(f)
+    except Exception:
+        scans = []
+
+    timestamp = datetime.now(timezone.utc).strftime('%m-%d_%H-%M-%S-%f')[:22]
+    axiom_tmp = AXIOM_TMP
+    os.makedirs(axiom_tmp, exist_ok=True)
+    safe_name = re.sub(r'[^a-z0-9]', '', scan_name.lower())[:10]
+
+    sub_scan_ids = []
+
+    for m in module_list:
+        m_scan_id = f"{m}+{timestamp}"
+        m_targets_file = os.path.join(axiom_tmp, f"{scan_name}_{m}_targets.txt")
+        os.makedirs(os.path.dirname(m_targets_file), exist_ok=True)
+
+        with open(m_targets_file, "w", encoding="utf-8") as f:
+            f.write("\n".join(target_lines) + "\n")
+
+        # Determine file extension from module JSON (e.g. nuclei → .txt)
+        ext = ".txt"
+        m_json_path = os.path.expanduser(f"~/.axiom/modules/{m}.json")
+        try:
+            with open(m_json_path) as _mf:
+                _mdata = json.load(_mf)
+                if isinstance(_mdata, list) and _mdata:
+                    raw_ext = _mdata[0].get("ext", "txt")
+                    ext = raw_ext if raw_ext.startswith('.') else f".{raw_ext}"
+        except Exception:
+            pass
+
+        m_output_file = os.path.join(IMPORTS_PATH, f"{m_scan_id}{ext}")
+        # Fleet prefix unique per module to prevent instance-name collisions
+        m_fleet_prefix = f"{safe_name}{m[:4]}" if instances_per_module else None
+
+        m_cmd = ["axiom-scan", m_targets_file, "-m", m, "-o", m_output_file]
+        if deployed_fleet_name:
+            m_cmd.extend(["--fleet", deployed_fleet_name])
+        elif instances_per_module and m_fleet_prefix:
+            m_cmd.extend(["--spinup", str(instances_per_module), "--fleet", m_fleet_prefix])
+        if fleet_control.get("rmWhenDone"):
+            m_cmd.append("--rm-when-done")
+        if fleet_control.get("regions"):
+            m_cmd.extend(["--regions", ",".join(fleet_control["regions"])])
+        if options.get("extraArgs"):
+            m_cmd.extend(shlex.split(options["extraArgs"]))
+
+        m_cmd_str = ' '.join([f'"{a}"' if ' ' in a else a for a in m_cmd])
+        m_log_file = os.path.join(axiom_tmp, f"{m_scan_id.replace('+', '_')}.log")
+        m_tmux_session = m_scan_id.replace('+', '_').replace(':', '_')
+
+        m_scan = {
+            "id": m_scan_id,
+            "name": scan_name,
+            "module": m,
+            "targets": targets,
+            "targetsFile": m_targets_file,
+            "outputFile": m_output_file,
+            "status": "running",
+            "startedAt": datetime.now(timezone.utc).isoformat() + "Z",
+            "completedAt": None,
+            "progress": 0,
+            "logFile": m_log_file,
+            "logs": [],
+            "splitMode": True,
+        }
+        scans.append(m_scan)
+
+        m_shell = _build_scan_shell(m_cmd_str, m_targets_file, m_output_file, m_log_file)
+        m_tmux_cmd = ["tmux", "new-session", "-d", "-s", m_tmux_session, m_shell]
+
+        def _launch(session=m_tmux_session, cmd=m_tmux_cmd, sid=m_scan_id):
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                print(f"[scans][split] {session} rc={r.returncode}")
+                if r.returncode != 0 and r.stderr:
+                    print(f"[scans][split] stderr: {r.stderr[:300]}")
+            except Exception as exc:
+                print(f"[scans][split] error launching {session}: {exc}")
+
+        threading.Thread(target=_launch, daemon=True).start()
+        print(f"[scans][split] Queued: {m_scan_id} (fleet={m_fleet_prefix}, instances={instances_per_module})")
+
+        if m_fleet_prefix:
+            with SCAN_INSTANCES["lock"]:
+                SCAN_INSTANCES["prefixes"].add(m_fleet_prefix)
+                save_scan_prefixes(SCAN_INSTANCES["prefixes"])
+
+        sub_scan_ids.append(m_scan_id)
+
+    save_scans(scans)
+    FLEET_CACHE["timestamp"] = 0
+
+    return jsonify({
+        "scanId":            sub_scan_ids[0],
+        "scanIds":           sub_scan_ids,
+        "status":            "initializing" if instances_per_module else "launched",
+        "mode":              "split",
+        "modulesLaunched":   len(sub_scan_ids),
+        "instancesPerModule": instances_per_module,
+        "message": (
+            f"Split mode: {len(sub_scan_ids)} parallel scan(s) launched — "
+            f"{instances_per_module} instance(s) per module. "
+            f"Modules: {', '.join(module_list)}"
+        ),
+    })
+
 
 @app.route("/api/axiom/scan", methods=["POST"])
 def launch_scan():
@@ -1799,13 +2193,28 @@ def launch_scan():
             return jsonify({"error": error_msg}), 500
     
     # Create scan record
-    module_name = module.replace('.json', '')
+    # Split comma-separated modules ("httpx,nuclei" → ["httpx", "nuclei"])
+    module_list = [m.strip().replace('.json', '') for m in module.split(",") if m.strip()]
+    module_name = "+".join(module_list)  # safe for filenames: "httpx+nuclei"
+
+    # ── Split mode: one axiom-scan per module on dedicated instances ──────────
+    if data.get("splitModulesPerInstance") and len(module_list) > 1:
+        return _launch_split_mode(
+            scan_name=scan_name,
+            targets=targets,
+            module_list=module_list,
+            fleet_control=data.get("fleetControl", {}),
+            options=data.get("options", {}),
+            deployed_fleet_name=deployed_fleet_name,
+        )
+    # ─────────────────────────────────────────────────────────────────────────
+
     scan_id = f"{module_name}+{datetime.now(timezone.utc).strftime('%m-%d_%H-%M-%S-%f')[:22]}"
 
     # Define targets_file path BEFORE building the scan record
     axiom_tmp = AXIOM_TMP  # Use configured temp path (Docker-friendly)
     os.makedirs(axiom_tmp, exist_ok=True)
-    targets_file = os.path.join(axiom_tmp, f"{scan_name}_{module}_targets.txt")
+    targets_file = os.path.join(axiom_tmp, f"{scan_name}_{module_name}_targets.txt")
     # scan_name may contain a team-prefix slash (e.g. "team/name") which
     # produces a subdirectory — make sure it exists before writing the file.
     os.makedirs(os.path.dirname(targets_file), exist_ok=True)
@@ -1830,6 +2239,8 @@ def launch_scan():
         "startedAt": datetime.now(timezone.utc).isoformat() + "Z",
         "completedAt": None,
         "progress": 0,
+        # Project association — set when the scan is launched from a project context.
+        "project_token": data.get("projectToken") or None,
         # Path to the per-scan wrapper log (written by the tmux shell below).
         # load_scans() watches this to detect a scan that finished/failed before
         # ever reaching stats.log (e.g. a missing tool aborts axiom-scan in <10s).
@@ -1875,20 +2286,20 @@ def launch_scan():
     # Create output directory in the imports folder for auto-import into dashboard
     # Most modules: output file goes directly to imports/ (module name is in filename)
     # Exception: gowitness outputs a folder of screenshots
-    if module == "gowitness":
+    if module_list == ["gowitness"]:
         # Gowitness outputs a directory, put it in imports/gowitness/
         output_dir = os.path.join(IMPORTS_PATH, "gowitness")
         os.makedirs(output_dir, exist_ok=True)
     else:
         # All other modules: put output file directly in imports/
-        # The filename already contains the module name (e.g., example-httpx.txt, example-whois.txt)
         output_dir = IMPORTS_PATH
-    
-    # Auto-generate output filename as {module}+{timestamp}.{ext}
-    # Avoids per-target modules (e.g. whois) creating a directory instead of a file
+
+    # Auto-generate output filename as {module_name}+{timestamp}.{ext}
+    # Use the first module's JSON to determine extension
     ext = ".txt"
+    first_module = module_list[0] if module_list else "scan"
     module_json_path = os.path.expanduser(
-        f"~/.axiom/modules/{module if module.endswith('.json') else module + '.json'}"
+        f"~/.axiom/modules/{first_module if first_module.endswith('.json') else first_module + '.json'}"
     )
     try:
         with open(module_json_path) as _mf:
@@ -1901,8 +2312,12 @@ def launch_scan():
     output_filename = f"{scan_id}{ext}"
     output_file_abs = os.path.join(output_dir, output_filename)
     print(f"[scans] Output: {output_file_abs}")
-    
-    cmd = ["axiom-scan", targets_file, "-m", module, "-o", output_file_abs]
+
+    # Build axiom-scan -m flags: one per module (comma list → repeated -m)
+    m_flags = []
+    for m in module_list:
+        m_flags.extend(["-m", m])
+    cmd = ["axiom-scan", targets_file] + m_flags + ["-o", output_file_abs]
     
     # Track which fleet prefix/name this scan will use
     fleet_prefix_to_track = None
@@ -2158,6 +2573,66 @@ def launch_scan():
         "message": message
     })
 
+@app.route("/api/axiom/scans/<path:scan_id>/project", methods=["PUT", "DELETE"])
+def link_scan_project(scan_id):
+    """Link (PUT) or unlink (DELETE) a scan/programName to/from a project.
+
+    PUT  body: {"projectToken": "<token>"}  — adds scan_id as a linked programName on the project
+    DELETE                                  — removes scan_id from all projects' linked_scans
+    """
+    body = request.json or {}
+    projects = load_projects()
+
+    if request.method == "PUT":
+        token = body.get("projectToken")
+        if not token:
+            return jsonify({"error": "projectToken required"}), 400
+        proj = projects.get(token)
+        if proj is None:
+            return jsonify({"error": "project not found"}), 404
+        linked = proj.setdefault("linked_scans", [])
+        if scan_id not in linked:
+            linked.append(scan_id)
+        save_projects(projects)
+        return jsonify({"ok": True, "scan_id": scan_id, "project": token})
+
+    # DELETE — remove from whichever project has it
+    changed = False
+    for proj in projects.values():
+        ls = proj.get("linked_scans", [])
+        if scan_id in ls:
+            proj["linked_scans"] = [x for x in ls if x != scan_id]
+            changed = True
+    if changed:
+        save_projects(projects)
+    return jsonify({"ok": True, "scan_id": scan_id})
+
+
+@app.route("/api/projects/<token>/linked-scans", methods=["GET"])
+def get_project_linked_scans(token):
+    """Return linked_scans for a project and the available programNames."""
+    projects = load_projects()
+    proj = projects.get(token)
+    if proj is None:
+        return jsonify({"error": "project not found"}), 404
+
+    # Collect all unique programNames from the targets store
+    try:
+        store = load_store()
+        all_program_names = sorted({
+            t.get("programName", "").strip()
+            for t in store.get("targets", [])
+            if t.get("programName", "").strip()
+        })
+    except Exception:
+        all_program_names = []
+
+    return jsonify({
+        "linked_scans": proj.get("linked_scans", []),
+        "available_program_names": all_program_names,
+    })
+
+
 @app.route("/api/axiom/scan/preview", methods=["POST"])
 def preview_scan_command():
     """Preview the axiom-scan command that would be executed without actually running it"""
@@ -2173,12 +2648,17 @@ def preview_scan_command():
         return jsonify({"error": "Missing required fields for preview"}), 400
     
     # Build the command exactly as it would be built in launch_scan
-    final_output_file = output_file or f"{scan_name}-{module}.txt"
+    preview_module_list = [m.strip().replace('.json', '') for m in module.split(",") if m.strip()]
+    preview_module_name = "+".join(preview_module_list)
+    final_output_file = output_file or f"{scan_name}-{preview_module_name}.txt"
     axiom_tmp = AXIOM_TMP  # Use configured temp path (Docker-friendly)
-    targets_file = os.path.join(axiom_tmp, f"{scan_name}_{module}_targets.txt")
+    targets_file = os.path.join(axiom_tmp, f"{scan_name}_{preview_module_name}_targets.txt")
     os.makedirs(os.path.dirname(targets_file), exist_ok=True)
 
-    cmd = ["axiom-scan", targets_file, "-m", module, "-o", final_output_file]
+    preview_m_flags = []
+    for m in preview_module_list:
+        preview_m_flags.extend(["-m", m])
+    cmd = ["axiom-scan", targets_file] + preview_m_flags + ["-o", final_output_file]
     
     # Add fleet control options
     if fleet_control.get("spinup"):
@@ -2231,19 +2711,35 @@ def preview_scan_command():
 
 @app.route("/api/axiom/scans", methods=["GET"])
 def get_scans():
-    """Get all scans from stats.log, sorted by most recent first"""
-    print("[API /api/axiom/scans] Loading scans...")
+    """Get scans from stats.log, sorted by most recent first.
+
+    Admins receive all scans. Regular users only see:
+      - Scans whose name starts with gw-<client-slug>- for any of their projects.
+      - Scans whose name does NOT start with 'gw-' (personal / workflow scans).
+    """
+    project_tokens = _get_caller_project_tokens(load_store())
     scans = load_scans()
-    print(f"[API /api/axiom/scans] Loaded {len(scans)} scans")
-    
-    if scans:
-        print(f"[API /api/axiom/scans] Sample scan (first): {scans[0]}")
-    else:
-        print("[API /api/axiom/scans] No scans loaded")
-    
-    # Sort by date/id in reverse order (most recent first)
+
+    if project_tokens is not None:
+        projects = load_projects()
+        # Build allowed gw- prefixes from the user's project client slugs
+        allowed_prefixes = []
+        for tok in project_tokens:
+            proj = projects.get(tok)
+            if proj:
+                client = proj.get("client", "")
+                slug = re.sub(r"[^a-z0-9]+", "-", client.lower()).strip("-")[:24]
+                allowed_prefixes.append(f"gw-{slug}-")
+
+        def _scan_allowed(s):
+            name = (s.get("name") or "").lower()
+            if not name.startswith("gw-"):
+                return True  # personal / workflow scans visible to all
+            return any(name.startswith(p) for p in allowed_prefixes)
+
+        scans = [s for s in scans if _scan_allowed(s)]
+
     scans_sorted = sorted(scans, key=lambda x: x.get("date", x.get("id", "")), reverse=True)
-    print(f"[API /api/axiom/scans] Returning {len(scans_sorted)} scans")
     return jsonify(scans_sorted)
 
 @app.route("/api/axiom/scans/<scan_id>", methods=["GET"])
@@ -2756,6 +3252,10 @@ def discover_scans_from_filesystem():
     _stored   = load_scans()
     _name_map = {s["id"]: s["name"] for s in _stored if s.get("id") and s.get("name")}
     _prefix_name_map: dict = {}
+    # Minute-level map: "module+MM-DD_HH-MM" → {id, name}
+    # Bridges the gap between the bridge scan_id timestamp (at launch) and the
+    # axiom internal folder timestamp (slightly later when axiom actually starts).
+    _minute_map: dict = {}
     for _s in _stored:
         _sid  = _s.get("id", "")
         _name = _s.get("name", "")
@@ -2764,6 +3264,12 @@ def discover_scans_from_filesystem():
             _pfx = _sid.rsplit("-", 1)[0]
             if _pfx and _pfx not in _prefix_name_map:
                 _prefix_name_map[_pfx] = _name
+            # Minute-level key: module+MM-DD_HH-MM (first 11 chars of timestamp)
+            _s_parts = _sid.rsplit("+", 1)
+            _s_ts = _s_parts[1] if len(_s_parts) > 1 else ""
+            _min_key = _s_parts[0] + "+" + _s_ts[:11] if _s_ts else ""
+            if _min_key and _min_key not in _minute_map:
+                _minute_map[_min_key] = {"id": _sid, "name": _name}
 
     print(f"[filesystem-scans] Checking {axiom_logs} for completed scans")
     print(f"[filesystem-scans] Checking {axiom_tmp} for running scans")
@@ -2827,9 +3333,22 @@ def discover_scans_from_filesystem():
                         logs_scan_status = "failed"
                         print(f"[filesystem-scans] Marking {folder} as FAILED: {logs_failure_reason}")
 
+                # Resolve folder → bridge scan entry: exact, second-prefix, minute-prefix
+                _logs_id = folder
+                _logs_name = _name_map.get(folder) or _prefix_name_map.get(folder.rsplit("-", 1)[0])
+                if not _logs_name:
+                    _f_parts = folder.rsplit("+", 1)
+                    _f_ts = _f_parts[1] if len(_f_parts) > 1 else ""
+                    _f_min_key = _f_parts[0] + "+" + _f_ts[:11] if _f_ts else ""
+                    _matched = _minute_map.get(_f_min_key)
+                    if _matched:
+                        _logs_id   = _matched["id"]    # use bridge id so frontend dedup works
+                        _logs_name = _matched["name"]
+                _logs_name = _logs_name or folder
+
                 logs_scan_entry = {
-                    "id": folder,
-                    "name": _name_map.get(folder) or _prefix_name_map.get(folder.rsplit("-", 1)[0]) or folder,
+                    "id": _logs_id,
+                    "name": _logs_name,
                     "module": module,
                     "status": logs_scan_status,
                     "date": timestamp,
@@ -2961,9 +3480,22 @@ def discover_scans_from_filesystem():
                         final_status = "failed"
                         print(f"[filesystem-scans] Marking {folder} as FAILED: {tmp_failure_reason}")
 
+                # Resolve folder → bridge scan entry: exact, second-prefix, minute-prefix
+                _tmp_id = folder
+                _tmp_name = _name_map.get(folder) or _prefix_name_map.get(folder.rsplit("-", 1)[0])
+                if not _tmp_name:
+                    _tf_parts = folder.rsplit("+", 1)
+                    _tf_ts = _tf_parts[1] if len(_tf_parts) > 1 else ""
+                    _tf_min_key = _tf_parts[0] + "+" + _tf_ts[:11] if _tf_ts else ""
+                    _t_matched = _minute_map.get(_tf_min_key)
+                    if _t_matched:
+                        _tmp_id   = _t_matched["id"]
+                        _tmp_name = _t_matched["name"]
+                _tmp_name = _tmp_name or folder
+
                 tmp_entry = {
-                    "id": folder,
-                    "name": _name_map.get(folder) or _prefix_name_map.get(folder.rsplit("-", 1)[0]) or folder,
+                    "id": _tmp_id,
+                    "name": _tmp_name,
                     "module": module,
                     "status": final_status,
                     "date": timestamp,
@@ -3701,6 +4233,61 @@ def _hash_pw(password: str) -> str:
 def _check_pw(password: str, hashed: str) -> bool:
     return secrets.compare_digest(_hash_pw(password), hashed)
 
+# Alias for instructions compatibility
+def _verify_pw(pw: str, hashed: str) -> bool:
+    return _check_pw(pw, hashed)
+
+# ── Persistent side-car stores (users.json, projects.json, user_workflows.json) ─
+# DATA_DIR is the directory that also holds the main store.
+DATA_DIR = os.path.dirname(os.path.abspath(STORE_PATH))
+
+USERS_STORE          = os.path.join(DATA_DIR, "users.json")
+PROJECTS_STORE       = os.path.join(DATA_DIR, "projects.json")
+USER_WORKFLOWS_STORE = os.path.join(DATA_DIR, "user_workflows.json")
+
+
+def _load_json_file(path: str, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _save_json_file(path: str, data) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, path)
+
+
+def load_users():
+    """Load the users sidecar file (dict keyed by username)."""
+    return _load_json_file(USERS_STORE, {})
+
+
+def save_users(users: dict) -> None:
+    _save_json_file(USERS_STORE, users)
+
+
+def load_projects():
+    """Load the projects sidecar file (dict keyed by token)."""
+    return _load_json_file(PROJECTS_STORE, {})
+
+
+def save_projects(projects: dict) -> None:
+    _save_json_file(PROJECTS_STORE, projects)
+
+
+def load_user_workflows():
+    """Load per-user workflows (dict keyed by username -> list of workflow dicts)."""
+    return _load_json_file(USER_WORKFLOWS_STORE, {})
+
+
+def save_user_workflows(wf: dict) -> None:
+    _save_json_file(USER_WORKFLOWS_STORE, wf)
+
 def _get_users(store):
     return store.setdefault("users", [])
 
@@ -3714,6 +4301,12 @@ def _require_admin():
     """Return 403 if the caller is not an admin.  Returns None when OK."""
     store = load_store()
     token = _token_from_request()
+
+    # The static env-var token is always admin-level regardless of user records
+    static = os.environ.get("GUI_AX_STATIC_TOKEN", "")
+    if static and token and secrets.compare_digest(token, static):
+        return None
+
     # Find the user associated with this token
     caller = next(
         (u for u in _get_users(store) if u.get("token") == token),
@@ -3732,6 +4325,32 @@ def _caller_user(store):
     """Return the AppUser dict for the current request's token, or None."""
     token = _token_from_request()
     return next((u for u in _get_users(store) if u.get("token") == token), None)
+
+
+def _get_caller_project_tokens(store):
+    """Return None for admin/legacy (sees all), or a set of allowed project tokens.
+
+    An empty set means the caller is a regular user with no projects assigned.
+    """
+    # Static env-var token is always admin-level
+    static = os.environ.get("GUI_AX_STATIC_TOKEN", "")
+    token = _token_from_request()
+    if static and token and secrets.compare_digest(token, static):
+        return None
+
+    caller = _caller_user(store)
+    if caller is None:
+        return None  # no user record = legacy single-user mode
+
+    if caller.get("role") == "admin":
+        return None  # admin sees everything
+
+    # Merge project tokens from both the store list and the users.json sidecar
+    allowed = set(caller.get("projects") or [])
+    sidecar = load_users().get(caller.get("username", ""), {})
+    allowed.update(sidecar.get("projects") or [])
+    return allowed
+
 
 def _ensure_admin_user():
     """Bootstrap the admin user from env-vars if the users list is empty.
@@ -3863,6 +4482,30 @@ def get_me():
         })
     safe = {k: v for k, v in user.items() if k not in ("passwordHash", "token")}
     return jsonify(safe)
+
+
+@app.route("/api/users/me/prefs", methods=["GET"])
+def get_my_prefs():
+    store = load_store()
+    user = _caller_user(store)
+    username = user["username"] if user else AUTH_USERNAME
+    users_file = load_users()
+    prefs = users_file.get(username, {}).get("prefs", {})
+    return jsonify(prefs)
+
+
+@app.route("/api/users/me/prefs", methods=["PATCH"])
+def patch_my_prefs():
+    store = load_store()
+    user = _caller_user(store)
+    username = user["username"] if user else AUTH_USERNAME
+    data = request.get_json(silent=True) or {}
+    users_file = load_users()
+    rec = users_file.setdefault(username, {})
+    prefs = rec.setdefault("prefs", {})
+    prefs.update(data)
+    save_users(users_file)
+    return jsonify({"ok": True, "prefs": prefs})
 
 
 @app.route("/api/users/me/password", methods=["PUT"])
@@ -4166,6 +4809,1553 @@ def _patched_login():
 
 if _orig_login:
     app.view_functions["auth_login"] = _patched_login
+
+
+# ── Target enrichment: notes + tags ──────────────────────────────────────────
+
+@app.route("/api/targets/<path:tid>", methods=["PATCH"])
+def patch_target(tid):
+    """Update mutable target fields: notes, tags, falsePositiveVulnIds."""
+    store = load_store()
+    target = next((t for t in store.get("targets", []) if t.get("id") == tid), None)
+    if not target:
+        abort(404)
+    body = request.get_json(silent=True) or {}
+    for field in ("notes", "tags", "falsePositiveVulnIds"):
+        if field in body:
+            target[field] = body[field]
+    save_store(store)
+    return jsonify(target)
+
+
+# ── CVE enrichment (NVD API v2 + CVEProject/cvelistV5) ────────────────────────
+
+_CVE_CACHE: dict = {}           # in-memory: cve_id → result dict
+_CVE_DISK_CACHE_FILE = os.path.join(DATA_DIR, "cve_cache.json")
+_CVE_DISK_TTL = 7 * 24 * 3600  # 7 days on disk
+
+import urllib.request as _ureq
+import urllib.error as _uerr
+
+
+def _cve_disk_load():
+    try:
+        with open(_CVE_DISK_CACHE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _cve_disk_save(cache: dict):
+    try:
+        with open(_CVE_DISK_CACHE_FILE, "w") as f:
+            json.dump(cache, f)
+    except Exception:
+        pass
+
+
+def _cvelistv5_path(cve_id: str) -> str:
+    """Return the raw GitHub URL for the CVE JSON in CVEProject/cvelistV5."""
+    parts = cve_id.split("-")
+    year = parts[1]
+    num = int(parts[2])
+    dir_name = f"{num // 1000}xxx"
+    return (
+        f"https://raw.githubusercontent.com/CVEProject/cvelistV5/main"
+        f"/cves/{year}/{dir_name}/{cve_id}.json"
+    )
+
+
+def _fetch_cvelistv5(cve_id: str) -> dict:
+    """Fetch raw CVE JSON from CVEProject/cvelistV5 on GitHub. Returns {} on failure."""
+    try:
+        url = _cvelistv5_path(cve_id)
+        req = _ureq.Request(url, headers={"User-Agent": "gui-ax/1.0"})
+        with _ureq.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        return {}
+
+
+def _parse_cvelistv5(raw: dict) -> dict:
+    """Extract PoC refs, KEV status, affected products from a cvelistV5 JSON."""
+    if not raw:
+        return {}
+
+    containers = raw.get("containers", {})
+    cna = containers.get("cna", {})
+    adp_list = containers.get("adp", []) or []
+
+    # Description (prefer English)
+    desc = ""
+    for d in cna.get("descriptions", []):
+        if d.get("lang", "").startswith("en"):
+            desc = d.get("value", "")
+            break
+
+    # CVSS — try v3.1 first, then v3.0, then v4.0
+    cvss = None
+    for metric in cna.get("metrics", []):
+        for key in ("cvssV3_1", "cvssV3_0", "cvssV4_0", "cvssV2_0"):
+            if key in metric:
+                m = metric[key]
+                cvss = {
+                    "baseScore":    m.get("baseScore"),
+                    "baseSeverity": m.get("baseSeverity"),
+                    "vectorString": m.get("vectorString"),
+                }
+                break
+        if cvss:
+            break
+
+    # References — keep all but tag the interesting ones
+    all_refs = []
+    poc_refs = []
+    exploit_tags = {"exploit", "exploit-code", "exploit_code", "proof-of-concept", "poc", "technical-description"}
+    for ref in cna.get("references", []):
+        url = ref.get("url", "")
+        tags = [t.lower() for t in (ref.get("tags") or [])]
+        entry = {"url": url, "tags": tags, "name": ref.get("name", "")}
+        all_refs.append(entry)
+        # Mark as PoC if tagged or URL pattern matches GitHub PoC repos
+        if any(t in exploit_tags for t in tags):
+            poc_refs.append(entry)
+        elif "github.com" in url.lower() and any(k in url.lower() for k in ["poc", "exploit", "cve-"]):
+            poc_refs.append(entry)
+
+    # Affected products (limit for UI)
+    affected = []
+    for a in cna.get("affected", [])[:6]:
+        vendor = a.get("vendor", "")
+        product = a.get("product", "")
+        versions = [
+            v.get("version", "")
+            for v in (a.get("versions") or [])
+            if v.get("status") == "affected"
+        ][:5]
+        affected.append({"vendor": vendor, "product": product, "versions": versions})
+
+    # CISA KEV / ADP enrichment
+    kev = False
+    exploitation = None
+    for adp in adp_list:
+        title = adp.get("title", "")
+        for metric in adp.get("metrics", []) or []:
+            other = metric.get("other", {})
+            if other.get("type", "").lower() == "kev":
+                kev = True
+            if other.get("type", "").lower() == "ssvc":
+                for opt in other.get("content", {}).get("options", []):
+                    if "Exploitation" in opt:
+                        exploitation = opt["Exploitation"]
+        # Also collect ADP references for PoC
+        for ref in adp.get("references", []) or []:
+            url = ref.get("url", "")
+            tags = [t.lower() for t in (ref.get("tags") or [])]
+            entry = {"url": url, "tags": tags, "name": ref.get("name", "")}
+            if any(t in exploit_tags for t in tags):
+                if entry not in poc_refs:
+                    poc_refs.append(entry)
+
+    return {
+        "description":   desc,
+        "cvss":          cvss,
+        "references":    all_refs,
+        "pocRefs":       poc_refs,
+        "affected":      affected,
+        "kev":           kev,
+        "exploitation":  exploitation,
+        "published":     raw.get("cveMetadata", {}).get("datePublished", ""),
+    }
+
+
+def _build_cve_result(cve_id: str) -> dict:
+    """Fetch from NVD (CVSS/description) and cvelistV5 (PoC refs/KEV), merge."""
+    result: dict = {"id": cve_id}
+
+    # ── NVD for CVSS + base description ──────────────────────────────────────
+    try:
+        nvd_url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}"
+        req = _ureq.Request(nvd_url, headers={"User-Agent": "gui-ax/1.0"})
+        with _ureq.urlopen(req, timeout=10) as resp:
+            nvd_data = json.loads(resp.read())
+        items = nvd_data.get("vulnerabilities", [])
+        if items:
+            cve_data = items[0].get("cve", {})
+            metrics = cve_data.get("metrics", {})
+            cvss_v3 = None
+            for m in metrics.get("cvssMetricV31", []) + metrics.get("cvssMetricV30", []):
+                cvss_v3 = m.get("cvssData", {})
+                break
+            result["description"]    = next(
+                (d["value"] for d in cve_data.get("descriptions", []) if d.get("lang") == "en"), "")
+            result["cvssV3Score"]    = cvss_v3.get("baseScore")    if cvss_v3 else None
+            result["cvssV3Severity"] = cvss_v3.get("baseSeverity") if cvss_v3 else None
+            result["cvssV3Vector"]   = cvss_v3.get("vectorString") if cvss_v3 else None
+            result["published"]      = cve_data.get("published", "")
+            result["lastModified"]   = cve_data.get("lastModified", "")
+            result["references"]     = [r.get("url") for r in cve_data.get("references", [])[:8]]
+    except Exception:
+        pass
+
+    # ── CVEProject/cvelistV5 for PoC refs, KEV, affected, richer description ─
+    v5_raw = _fetch_cvelistv5(cve_id)
+    v5 = _parse_cvelistv5(v5_raw)
+    if v5:
+        # Prefer v5 description if we got nothing from NVD
+        if not result.get("description") and v5.get("description"):
+            result["description"] = v5["description"]
+        # Prefer v5 CVSS if NVD gave nothing
+        if not result.get("cvssV3Score") and v5.get("cvss"):
+            c = v5["cvss"]
+            result["cvssV3Score"]    = c.get("baseScore")
+            result["cvssV3Severity"] = c.get("baseSeverity")
+            result["cvssV3Vector"]   = c.get("vectorString")
+        result["pocRefs"]      = v5.get("pocRefs", [])
+        result["kev"]          = v5.get("kev", False)
+        result["exploitation"] = v5.get("exploitation")
+        result["affected"]     = v5.get("affected", [])
+        # Merge v5 references (tags) with NVD plain URLs
+        v5_urls = {r["url"] for r in v5.get("references", [])}
+        existing_urls = set(result.get("references", []))
+        extra_refs = [
+            r for r in v5.get("references", [])
+            if r["url"] not in existing_urls
+        ]
+        result["referencesTagged"] = v5.get("references", [])
+        # Add any URLs that weren't in NVD
+        for r in extra_refs:
+            if r["url"] not in existing_urls:
+                result.setdefault("references", []).append(r["url"])
+    else:
+        result.setdefault("pocRefs", [])
+        result.setdefault("kev", False)
+        result.setdefault("affected", [])
+        result.setdefault("referencesTagged", [])
+
+    return result
+
+
+@app.route("/api/cve/<cve_id>", methods=["GET"])
+def get_cve(cve_id):
+    """Fetch CVE details from NVD + CVEProject/cvelistV5, merged. Persistent disk cache."""
+    cve_id = cve_id.upper().strip()
+    if not re.match(r'^CVE-\d{4}-\d+$', cve_id):
+        return jsonify({"error": "invalid CVE id"}), 400
+
+    # In-memory cache hit
+    if cve_id in _CVE_CACHE:
+        return jsonify(_CVE_CACHE[cve_id])
+
+    # Disk cache hit (survives restarts)
+    import time as _time
+    disk = _cve_disk_load()
+    entry = disk.get(cve_id, {})
+    if entry and _time.time() - entry.get("_ts", 0) < _CVE_DISK_TTL:
+        _CVE_CACHE[cve_id] = entry["data"]
+        return jsonify(entry["data"])
+
+    try:
+        result = _build_cve_result(cve_id)
+        if not result.get("description") and not result.get("cvssV3Score"):
+            return jsonify({"error": "CVE not found in NVD or cvelistV5"}), 404
+        _CVE_CACHE[cve_id] = result
+        disk[cve_id] = {"_ts": _time.time(), "data": result}
+        _cve_disk_save(disk)
+        return jsonify(result)
+    except _uerr.URLError as e:
+        return jsonify({"error": f"Network unreachable: {e}"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cve/batch", methods=["POST"])
+def get_cve_batch():
+    """Fetch multiple CVEs at once (max 30). Used by inventory cards."""
+    import time as _time
+    import concurrent.futures as _cf
+
+    body = request.get_json(silent=True) or {}
+    ids = [c.upper().strip() for c in body.get("ids", [])
+           if re.match(r'^CVE-\d{4}-\d+$', c.strip(), re.IGNORECASE)]
+    ids = list(dict.fromkeys(ids))[:30]  # dedup + limit
+
+    disk = _cve_disk_load()
+    now = _time.time()
+    results: dict = {}
+    to_fetch: list = []
+
+    for cid in ids:
+        if cid in _CVE_CACHE:
+            results[cid] = _CVE_CACHE[cid]
+            continue
+        entry = disk.get(cid, {})
+        if entry and now - entry.get("_ts", 0) < _CVE_DISK_TTL:
+            _CVE_CACHE[cid] = entry["data"]
+            results[cid] = entry["data"]
+        else:
+            to_fetch.append(cid)
+
+    def _fetch_one(cid):
+        try:
+            return cid, _build_cve_result(cid)
+        except Exception:
+            return cid, None
+
+    if to_fetch:
+        with _cf.ThreadPoolExecutor(max_workers=5) as pool:
+            for cid, data in pool.map(_fetch_one, to_fetch):
+                if data and (data.get("description") or data.get("cvssV3Score")):
+                    _CVE_CACHE[cid] = data
+                    disk[cid] = {"_ts": now, "data": data}
+                    results[cid] = data
+        _cve_disk_save(disk)
+
+    return jsonify(results)
+
+
+# ── SearchSploit (offline Exploit-DB search) ──────────────────────────────────
+
+_SEARCHSPLOIT_CACHE: dict = {}  # query → parsed results, in-memory
+
+
+@app.route("/api/searchsploit/<path:query>", methods=["GET"])
+def get_searchsploit(query):
+    """Look up public exploits for a query (CVE id, product name, ...) via the
+    local searchsploit CLI (offline Exploit-DB database). Results cached
+    in-memory for the bridge lifetime."""
+    query = query.strip()
+    if not query:
+        return jsonify({"error": "empty query"}), 400
+    if query in _SEARCHSPLOIT_CACHE:
+        return jsonify(_SEARCHSPLOIT_CACHE[query])
+    binary = shutil.which("searchsploit")
+    if not binary:
+        return jsonify({"error": "searchsploit is not installed on the bridge host"}), 503
+    try:
+        proc = subprocess.run(
+            [binary, "--json", query],
+            capture_output=True, text=True, timeout=15,
+        )
+        data = json.loads(proc.stdout or "{}")
+        results = [
+            {
+                "title":    r.get("Title", ""),
+                "path":     r.get("Path", ""),
+                "type":     r.get("Type", ""),
+                "platform": r.get("Platform", ""),
+                "date":     r.get("Date_Published", ""),
+                "codes":    r.get("Codes", ""),
+            }
+            for r in data.get("RESULTS_EXPLOIT", [])[:10]
+        ]
+        result = {"query": query, "results": results}
+        _SEARCHSPLOIT_CACHE[query] = result
+        return jsonify(result)
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "searchsploit timed out"}), 504
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── AI analysis (Ollama / Claude) ─────────────────────────────────────────────
+
+def _ollama_url() -> str:
+    # Default: Mac Ollama accessed from inside Docker via host.docker.internal.
+    # Override with OLLAMA_URL env var to point at LiteLLM or a remote Ollama.
+    return os.environ.get("OLLAMA_URL", "http://host.docker.internal:11434").rstrip("/")
+
+
+def _ollama_reachable() -> bool:
+    import urllib.request as _ureq
+    try:
+        with _ureq.urlopen(f"{_ollama_url()}/api/tags", timeout=2) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+@app.route("/api/ai/status", methods=["GET"])
+def ai_status():
+    """Return which AI providers are configured / reachable.
+    Does NOT require auth so the Settings tab can show status before login."""
+    return jsonify({
+        "claude": bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()),
+        "claudeModel": os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001"),
+        "ollama": _ollama_reachable(),
+        "ollamaUrl": _ollama_url(),
+        "ollamaModel": os.environ.get("OLLAMA_MODEL", "llama3.2"),
+    })
+
+
+@app.route("/api/ai/analyze", methods=["POST"])
+def ai_analyze():
+    """Call an LLM to analyze security data.
+
+    Body: { "prompt": str, "provider": "auto"|"ollama"|"claude" }
+    Returns: { "response": str, "provider": str, "model": str }
+
+    "auto" prefers Ollama (local, private) then Claude, then 400.
+    """
+    import urllib.request as _ureq
+    import urllib.error as _uerr
+
+    data = request.get_json(force=True) or {}
+    prompt = (data.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "prompt is required"}), 400
+
+    provider = (data.get("provider") or "auto").lower()
+    claude_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+
+    if provider == "auto":
+        if _ollama_reachable():
+            provider = "ollama"
+        elif claude_key:
+            provider = "claude"
+        else:
+            return jsonify({
+                "error": "No AI provider available. Start Ollama or set ANTHROPIC_API_KEY."
+            }), 400
+
+    # ── Ollama (local) ─────────────────────────────────────────────────────────
+    if provider == "ollama":
+        model = os.environ.get("OLLAMA_MODEL", "llama3.2")
+        url = f"{_ollama_url()}/api/generate"
+        payload = json.dumps({
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+        }).encode()
+        req = _ureq.Request(
+            url, data=payload,
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        try:
+            with _ureq.urlopen(req, timeout=60) as resp:
+                result = json.loads(resp.read())
+            return jsonify({
+                "response": result.get("response", ""),
+                "provider": "ollama",
+                "model": model,
+            })
+        except _uerr.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            return jsonify({"error": f"Ollama error {e.code}: {body}"}), 502
+        except Exception as e:
+            return jsonify({"error": f"Ollama request failed: {e}"}), 502
+
+    # ── Claude (Anthropic API) ─────────────────────────────────────────────────
+    if provider == "claude":
+        if not claude_key:
+            return jsonify({"error": "ANTHROPIC_API_KEY is not set"}), 400
+        model = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+        payload = json.dumps({
+            "model": model,
+            "max_tokens": 2048,
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode()
+        req = _ureq.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=payload,
+            headers={
+                "x-api-key": claude_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with _ureq.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read())
+            return jsonify({
+                "response": result["content"][0]["text"],
+                "provider": "claude",
+                "model": model,
+            })
+        except _uerr.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            return jsonify({"error": f"Claude API error {e.code}: {body}"}), 502
+        except Exception as e:
+            return jsonify({"error": f"Claude request failed: {e}"}), 502
+
+    return jsonify({"error": f"Unknown provider: {provider}"}), 400
+
+
+# ── Cross-target findings / triage ────────────────────────────────────────────
+
+@app.route("/api/findings", methods=["GET"])
+def list_findings():
+    """Aggregate vulnerabilities across all targets with dedup + filtering.
+
+    Query params:
+      severity        — filter: critical/high/medium/low/info
+      target          — filter by target id
+      projectToken    — filter to scans explicitly linked to this project token
+                        (preferred over programPrefix; returns linkedScansCount in meta)
+      programPrefix   — legacy: filter by programName prefix (e.g. "gw-acme-")
+                        used as fallback when projectToken has no linked scans
+      q               — free-text search in name or description
+      fp              — include false positives: true/false (default false)
+      limit           — max results to return (default 100, max 1000)
+      offset          — skip this many results (for pagination)
+    """
+    from collections import defaultdict
+    store            = load_store()
+    severity_filter  = (request.args.get("severity") or "").lower()
+    target_filter    = request.args.get("target", "")
+    project_token    = (request.args.get("projectToken") or "").strip()
+    program_prefix   = (request.args.get("programPrefix") or "").lower()
+    q                = (request.args.get("q") or "").lower()
+    include_fp       = request.args.get("fp", "false").lower() == "true"
+    limit            = min(int(request.args.get("limit", 100)), 5000)
+    offset           = max(int(request.args.get("offset", 0)), 0)
+
+    all_targets = store.get("targets", [])
+    linked_scans_count = None  # None = filter not by project; 0 = project set but no linked scans
+
+    # Project-token filter: match targets whose programName is in the project's
+    # linked_scans list (stored on the project record, not on scan records).
+    if project_token:
+        linked_scan_names = _get_linked_scan_names(project_token)
+        linked_scans_count = len(linked_scan_names)
+        if linked_scan_names:
+            all_targets = [
+                t for t in all_targets
+                if (t.get("programName") or "").lower() in linked_scan_names
+            ]
+        else:
+            # No scans linked yet — return empty so the UI can show a message
+            all_targets = []
+    elif program_prefix:
+        # Legacy fallback: match by client-slug prefix
+        all_targets = [
+            t for t in all_targets
+            if (t.get("programName") or "").lower().startswith(program_prefix)
+        ]
+
+    # First pass: for each finding key collect every unique domain that has it,
+    # so we can show "multiple (N)" in the UI.  Use domain as the dedup key
+    # (not targetId) so that targets sharing an id but having different domains
+    # — like the multi-domain nuclei_targets entries — are all counted.
+    key_domains: dict = defaultdict(list)
+    for t in all_targets:
+        domain = t.get("domain", t.get("id", ""))
+        for v in (t.get("vulnerabilities") or []):
+            sev = (v.get("severity") or "").upper()
+            dk = f"{(v.get('name') or '').lower()}|{sev}"
+            if domain not in key_domains[dk]:
+                key_domains[dk].append(domain)
+
+    findings: list = []
+    seen_hashes: set = set()
+
+    for t in all_targets:
+        tid = t.get("id", "")
+        if target_filter and tid != target_filter:
+            continue
+        fp_ids = set(t.get("falsePositiveVulnIds", []))
+        prog = t.get("programName", "")
+        for v in (t.get("vulnerabilities") or []):
+            vid = v.get("id", "")
+            if not include_fp and vid in fp_ids:
+                continue
+            sev = (v.get("severity") or "").upper()
+            if severity_filter and sev.lower() != severity_filter:
+                continue
+            name = (v.get("name") or "").lower()
+            desc = (v.get("description") or "").lower()
+            if q and q not in name and q not in desc:
+                continue
+            dedup_key = f"{name}|{sev}"
+            is_dupe = dedup_key in seen_hashes
+            seen_hashes.add(dedup_key)
+            findings.append({
+                **v,
+                "targetId":        tid,
+                "targetDomain":    t.get("domain", tid),
+                "programName":     prog,
+                "affectedDomains": key_domains.get(dedup_key, []),
+                "isFalsePositive": vid in fp_ids,
+                "isDuplicate":     is_dupe,
+            })
+
+    total = len(findings)
+    page_slice = findings[offset:offset + limit]
+    resp = {"findings": page_slice, "total": total}
+    if linked_scans_count is not None:
+        resp["linkedScansCount"] = linked_scans_count
+    return jsonify(resp)
+
+
+@app.route("/api/findings/mark-fp", methods=["POST"])
+def mark_finding_fp():
+    """Mark or unmark a vulnerability as a false positive on a specific target."""
+    body  = request.get_json(silent=True) or {}
+    tid   = body.get("targetId")
+    vid   = body.get("vulnId")
+    is_fp = bool(body.get("isFalsePositive", True))
+    if not tid or not vid:
+        return jsonify({"error": "targetId and vulnId are required"}), 400
+    store  = load_store()
+    target = next((t for t in store.get("targets", []) if t.get("id") == tid), None)
+    if not target:
+        abort(404)
+    fp_ids = set(target.get("falsePositiveVulnIds", []))
+    if is_fp:
+        fp_ids.add(vid)
+    else:
+        fp_ids.discard(vid)
+    target["falsePositiveVulnIds"] = list(fp_ids)
+    save_store(store)
+    return jsonify({"ok": True, "falsePositiveVulnIds": target["falsePositiveVulnIds"]})
+
+
+# ── Wordlist catalog ──────────────────────────────────────────────────────────
+
+def _classify_wordlist(fname: str, dirpath: str) -> str:
+    needle = (fname + " " + dirpath).lower()
+    if any(k in needle for k in ("subdomain", "dns", "sublist", "resolvers", "alterations")):
+        return "subdomains"
+    if any(k in needle for k in ("director", "/dir", "path", "content", "web", "raft", "dirbuster")):
+        return "directories"
+    if any(k in needle for k in ("username", "user", "login", "account")):
+        return "usernames"
+    if any(k in needle for k in ("password", "pass", "rockyou", "credential", "common-credential")):
+        return "passwords"
+    if any(k in needle for k in ("fuzz", "param", "payload", "xss", "sqli", "lfi")):
+        return "fuzzing"
+    if any(k in needle for k in ("api", "endpoint", "route", "swagger", "graphql")):
+        return "api"
+    return "general"
+
+
+@app.route("/api/wordlists", methods=["GET"])
+def list_wordlists():
+    """Scan common wordlist locations on the host and return a catalog."""
+    common_paths = [
+        "/usr/share/wordlists",
+        "/usr/share/seclists",
+        os.path.expanduser("~/wordlists"),
+        os.path.expanduser("~/SecLists"),
+        os.path.expanduser("~/.axiom/wordlists"),
+        "/opt/wordlists",
+        "/opt/SecLists",
+    ]
+    result: list = []
+    max_files = int(request.args.get("limit", "300"))
+
+    for base in common_paths:
+        if not os.path.isdir(base):
+            continue
+        for root, dirs, files in os.walk(base):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for fname in files:
+                if len(result) >= max_files:
+                    break
+                if fname.startswith("."):
+                    continue
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in (".txt", ".lst", ".list", ""):
+                    continue
+                fpath = os.path.join(root, fname)
+                try:
+                    sz = os.path.getsize(fpath)
+                    line_count = 0
+                    if sz < 30 * 1024 * 1024:  # skip line count for files > 30 MB
+                        with open(fpath, "r", errors="ignore") as f:
+                            for _ in f:
+                                line_count += 1
+                    result.append({
+                        "path":      fpath,
+                        "name":      fname,
+                        "category":  _classify_wordlist(fname, root),
+                        "size":      sz,
+                        "lineCount": line_count,
+                        "relPath":   os.path.relpath(fpath, base),
+                    })
+                except Exception:
+                    pass
+
+    result.sort(key=lambda x: (x["category"], x["name"]))
+    return jsonify({"wordlists": result, "total": len(result)})
+
+
+# ── Risk scoring ──────────────────────────────────────────────────────────────
+
+@app.route("/api/targets/<path:tid>/risk", methods=["GET"])
+def get_target_risk(tid):
+    """Compute a risk score (0-100) for a target based on its vulnerability profile."""
+    store  = load_store()
+    target = next((t for t in store.get("targets", []) if t.get("id") == tid), None)
+    if not target:
+        abort(404)
+    vulns   = target.get("vulnerabilities") or []
+    fp_ids  = set(target.get("falsePositiveVulnIds", []))
+    # Severity weights (Rekono-inspired)
+    weights = {"CRITICAL": 10, "HIGH": 5, "MEDIUM": 2, "LOW": 0.5, "INFO": 0}
+    raw = sum(
+        weights.get((v.get("severity") or "").upper(), 0)
+        for v in vulns if v.get("id") not in fp_ids
+    )
+    # Open ports add marginal weight
+    port_count = sum(
+        len(s.get("ports", []))
+        for s in (target.get("subdomains") or [])
+    )
+    raw += port_count * 0.1
+    score = min(100, round(raw, 1))
+    if score >= 75:
+        level = "CRITICAL"
+    elif score >= 40:
+        level = "HIGH"
+    elif score >= 15:
+        level = "MEDIUM"
+    elif score > 0:
+        level = "LOW"
+    else:
+        level = "NONE"
+    return jsonify({"targetId": tid, "score": score, "level": level,
+                    "vulnCount": len(vulns), "portCount": port_count})
+
+
+# ── /api/admin — project-aware user management ───────────────────────────────
+
+@app.route("/api/admin/users", methods=["GET"])
+def admin_list_users():
+    """Admin-only: list all users in the sidecar users.json (not the env-var admin)."""
+    err = _require_admin()
+    if err:
+        return err
+    users = load_users()
+    # Strip password hashes; return list of safe dicts
+    safe = [
+        {k: v for k, v in u.items() if k != "passwordHash"}
+        for u in users.values()
+    ]
+    return jsonify(safe)
+
+
+@app.route("/api/admin/users", methods=["POST"])
+def admin_create_update_user():
+    """Admin-only: create or update a user in users.json."""
+    err = _require_admin()
+    if err:
+        return err
+    data         = request.get_json(silent=True) or {}
+    username     = (data.get("username") or "").strip()
+    password     = data.get("password")  # optional — omit to keep existing
+    role         = data.get("role", "user")
+    projects     = data.get("projects", [])
+    display_name = (data.get("display_name") or "").strip()
+
+    if not username:
+        return jsonify({"error": "username is required"}), 400
+    if role not in ("admin", "user"):
+        role = "user"
+
+    users = load_users()
+    existing = users.get(username, {})
+
+    pw_hash = existing.get("passwordHash")
+    if password:
+        pw_hash = _hash_pw(password)
+    elif not pw_hash:
+        return jsonify({"error": "password is required for new users"}), 400
+
+    users[username] = {
+        "username":     username,
+        "display_name": display_name or existing.get("display_name", ""),
+        "role":         role,
+        "projects":     projects,
+        "passwordHash": pw_hash,
+        "createdAt":    existing.get("createdAt", datetime.now(timezone.utc).isoformat()),
+    }
+    save_users(users)
+    safe = {k: v for k, v in users[username].items() if k != "passwordHash"}
+    status = 200 if existing else 201
+    return jsonify(safe), status
+
+
+@app.route("/api/admin/users/<username>", methods=["DELETE"])
+def admin_delete_user(username):
+    """Admin-only: delete a user from users.json."""
+    err = _require_admin()
+    if err:
+        return err
+    users = load_users()
+    if username not in users:
+        return jsonify({"error": "user not found"}), 404
+    del users[username]
+    save_users(users)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/admin/users/<username>/token", methods=["POST"])
+def admin_get_user_token(username):
+    """Admin-only: generate (or refresh) an active auth token for a named user.
+
+    Used by Ghostwriter to obtain a per-user token for iframe autoauth so each
+    consultant sees their own data instead of the shared admin account.
+    auth_status resolves identity via store["users"], so we mirror the user
+    there from users.json if needed so the token resolves to the right person.
+    """
+    err = _require_admin()
+    if err:
+        return err
+
+    store = load_store()
+    users = _get_users(store)
+    user = next((u for u in users if u.get("username") == username), None)
+
+    if user is None:
+        # Fall back to users.json (populated by admin_create_update_user / Ghostwriter sync)
+        users_file = load_users()
+        if username in users_file:
+            file_rec = users_file[username]
+            user = {
+                "username":     username,
+                "role":         file_rec.get("role", "user"),
+                "projects":     file_rec.get("projects", []),
+                "display_name": file_rec.get("display_name", username),
+            }
+            users.append(user)
+            store["users"] = users
+        else:
+            return jsonify({"error": f"user '{username}' not found"}), 404
+
+    token = secrets.token_hex(32)
+    _active_tokens.add(token)
+    user["token"] = token
+    store["users"] = users
+    save_store(store)
+
+    return jsonify({"ok": True, "token": token, "username": username})
+
+
+@app.route("/api/admin/projects", methods=["POST"])
+def admin_register_project():
+    """Admin-only: register a project in projects.json."""
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    token         = (data.get("token") or "").strip()
+    name          = (data.get("name") or "").strip()
+    client        = (data.get("client") or "").strip()
+    project_type  = (data.get("project_type") or "").strip()
+    ghostwriter_id = data.get("ghostwriter_id")
+
+    if not token:
+        return jsonify({"error": "token is required"}), 400
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    projects = load_projects()
+    projects[token] = {
+        "token":          token,
+        "name":           name,
+        "client":         client,
+        "project_type":   project_type,
+        "ghostwriter_id": ghostwriter_id,
+        "createdAt":      datetime.now(timezone.utc).isoformat(),
+    }
+    save_projects(projects)
+    return jsonify(projects[token]), 201
+
+
+@app.route("/api/admin/projects", methods=["GET"])
+def admin_list_projects():
+    """Admin-only: list all registered projects."""
+    err = _require_admin()
+    if err:
+        return err
+    projects = load_projects()
+    return jsonify(list(projects.values()))
+
+
+@app.route("/api/projects/mine", methods=["GET"])
+def my_projects():
+    """Authenticated: return projects the current user can access.
+    Admin → all projects; regular user → only their assigned project tokens."""
+    store = load_store()
+    caller = _caller_user(store)
+
+    projects = load_projects()
+
+    if caller is None or caller.get("role") == "admin":
+        # Legacy admin or env-var admin: return all projects
+        return jsonify(list(projects.values()))
+
+    # Regular user: filter to their assigned tokens
+    allowed_tokens = set(caller.get("projects") or [])
+
+    # Also check the sidecar users.json (admin may manage users there)
+    sidecar_users = load_users()
+    sidecar_record = sidecar_users.get(caller.get("username", ""), {})
+    allowed_tokens.update(sidecar_record.get("projects", []))
+
+    result = [p for token, p in projects.items() if token in allowed_tokens]
+    return jsonify(result)
+
+
+@app.route("/api/projects", methods=["POST"])
+def create_project():
+    """Authenticated: create a project and auto-assign it to the caller."""
+    store = load_store()
+    caller = _caller_user(store)
+
+    data = request.get_json(silent=True) or {}
+    name         = (data.get("name") or "").strip()
+    client       = (data.get("client") or "").strip()
+    project_type = (data.get("project_type") or "").strip()
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    if not client:
+        return jsonify({"error": "client is required"}), 400
+
+    slug  = re.sub(r"[^a-z0-9]+", "-", f"{client}-{name}".lower()).strip("-")[:28]
+    token = f"{slug}-{secrets.token_hex(3)}"
+
+    projects = load_projects()
+    if token in projects:
+        token = f"{slug}-{secrets.token_hex(4)}"
+
+    username = caller.get("username") if caller else AUTH_USERNAME
+    is_admin = (caller is None) or caller.get("role") == "admin"
+
+    projects[token] = {
+        "token":        token,
+        "name":         name,
+        "client":       client,
+        "project_type": project_type,
+        "ghostwriter_id": None,
+        "createdAt":    datetime.now(timezone.utc).isoformat(),
+        "createdBy":    username,
+    }
+    save_projects(projects)
+
+    # Assign the new project token to the creating user (non-admins only)
+    if not is_admin:
+        sidecar = load_users()
+        rec = sidecar.setdefault(username, {})
+        if token not in rec.get("projects", []):
+            rec.setdefault("projects", []).append(token)
+            save_users(sidecar)
+
+    return jsonify(projects[token]), 201
+
+
+@app.route("/api/projects/<token>", methods=["DELETE"])
+def delete_project(token):
+    """Admin or project creator: delete a project."""
+    store = load_store()
+    caller = _caller_user(store)
+
+    projects = load_projects()
+    if token not in projects:
+        return jsonify({"error": "not found"}), 404
+
+    proj = projects[token]
+    is_admin = (caller is None) or caller.get("role") == "admin"
+    is_creator = caller and caller.get("username") == proj.get("createdBy")
+
+    if not (is_admin or is_creator):
+        return jsonify({"error": "forbidden"}), 403
+
+    del projects[token]
+    save_projects(projects)
+
+    # Remove the token from all user assignments
+    sidecar = load_users()
+    changed = False
+    for _u, rec in sidecar.items():
+        if token in rec.get("projects", []):
+            rec["projects"] = [t for t in rec["projects"] if t != token]
+            changed = True
+    if changed:
+        save_users(sidecar)
+
+    return jsonify({"ok": True})
+
+
+@app.route("/api/projects/<token>", methods=["PATCH"])
+def update_project(token):
+    """Admin or project creator: update project name/client/type."""
+    store = load_store()
+    caller = _caller_user(store)
+
+    projects = load_projects()
+    if token not in projects:
+        return jsonify({"error": "not found"}), 404
+
+    proj = projects[token]
+    is_admin = (caller is None) or caller.get("role") == "admin"
+    is_creator = caller and caller.get("username") == proj.get("createdBy")
+
+    if not (is_admin or is_creator):
+        return jsonify({"error": "forbidden"}), 403
+
+    data = request.get_json(silent=True) or {}
+    if "name"         in data: proj["name"]         = (data["name"] or "").strip()
+    if "client"       in data: proj["client"]       = (data["client"] or "").strip()
+    if "project_type" in data: proj["project_type"] = (data["project_type"] or "").strip()
+
+    projects[token] = proj
+    save_projects(projects)
+    return jsonify(proj)
+
+
+@app.route("/api/projects/<token>/retag-targets", methods=["POST"])
+def retag_project_targets(token):
+    """Retag historical targets that were imported without a gw- programName.
+
+    When a scan is launched from Ghostwriter the bridge labels the output file
+    with the scan label (e.g. "gw-acme-c3-5").  If the scan completed while
+    scans.json was empty (bridge restart) the importer falls back to the module
+    name ("nuclei"), breaking the project filter.  This endpoint retroactively
+    updates programName for those targets.
+
+    Body:
+      - domains: list of root domains that belong to this project
+      - label:   the gw- label to assign (e.g. "gw-acme-c3-3")
+    Only touches targets whose domain is in the list AND whose programName does
+    NOT already start with "gw-".
+    """
+    projects = load_projects()
+    if token not in projects:
+        return jsonify({"error": "not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    domains = [d.lower().strip() for d in (data.get("domains") or []) if d]
+    label = (data.get("label") or "").strip()
+
+    if not domains or not label:
+        return jsonify({"error": "domains and label are required"}), 400
+
+    domain_set = set(domains)
+    store = load_store()
+    targets = store.get("targets", [])
+
+    updated = 0
+    for t in targets:
+        t_domain = (t.get("domain") or "").lower().strip()
+        if t_domain in domain_set and not (t.get("programName") or "").startswith("gw-"):
+            t["programName"] = label
+            updated += 1
+
+    if updated:
+        store["targets"] = targets
+        save_store(store)
+
+    print(f"[retag-targets] token={token} label={label} updated={updated}")
+    return jsonify({"updated": updated, "label": label})
+
+
+# ── /api/workflows/user — per-user saved workflows ────────────────────────────
+
+@app.route("/api/workflows/user", methods=["GET"])
+def list_user_workflows():
+    """Return workflows saved by the currently logged-in user."""
+    store = load_store()
+    caller = _caller_user(store)
+    if caller is None:
+        username = AUTH_USERNAME  # legacy single-user
+    else:
+        username = caller.get("username", "")
+
+    wf_store = load_user_workflows()
+    return jsonify(wf_store.get(username, []))
+
+
+@app.route("/api/workflows/user", methods=["POST"])
+def save_user_workflow():
+    """Save a workflow for the current user.
+    Body: {name, description, steps}
+    Auto-generates id and sets owner to current username."""
+    import uuid as _uuid
+    store = load_store()
+    caller = _caller_user(store)
+    if caller is None:
+        username = AUTH_USERNAME
+    else:
+        username = caller.get("username", "")
+
+    data        = request.get_json(silent=True) or {}
+    name        = (data.get("name") or "").strip()
+    description = (data.get("description") or "").strip()
+    steps       = data.get("steps", [])
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    wf_store = load_user_workflows()
+    user_wfs = wf_store.setdefault(username, [])
+
+    new_wf = {
+        "id":          str(_uuid.uuid4()),
+        "name":        name,
+        "description": description,
+        "steps":       steps,
+        "inputType":   data.get("inputType", "domains"),
+        "tags":        data.get("tags", []),
+        "difficulty":  data.get("difficulty", "medium"),
+        "owner":       username,
+        "created_at":  datetime.now(timezone.utc).isoformat(),
+    }
+    user_wfs.append(new_wf)
+    save_user_workflows(wf_store)
+    return jsonify(new_wf), 201
+
+
+@app.route("/api/workflows/user/<wf_id>", methods=["DELETE"])
+def delete_user_workflow(wf_id):
+    """Delete a workflow owned by the current user."""
+    store = load_store()
+    caller = _caller_user(store)
+    if caller is None:
+        username = AUTH_USERNAME
+    else:
+        username = caller.get("username", "")
+
+    wf_store = load_user_workflows()
+    user_wfs = wf_store.get(username, [])
+    before   = len(user_wfs)
+    wf_store[username] = [w for w in user_wfs if w.get("id") != wf_id]
+    if len(wf_store[username]) == before:
+        return jsonify({"error": "workflow not found"}), 404
+    save_user_workflows(wf_store)
+    return jsonify({"ok": True})
+
+
+# ── CVE Inventory Monitor ──────────────────────────────────────────────────────
+
+INVENTORY_PATH = os.path.join(os.path.dirname(STORE_PATH), "inventory.json")
+
+_inventory_lock   = threading.Lock()
+_inventory_thread = None          # running background refresh thread
+_inventory_progress = {"done": 0, "total": 0}
+
+
+def _load_inventory() -> dict:
+    try:
+        with open(INVENTORY_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"last_full_scan": None, "technologies": []}
+    except Exception:
+        return {"last_full_scan": None, "technologies": []}
+
+
+def _save_inventory(inv: dict):
+    os.makedirs(os.path.dirname(INVENTORY_PATH) or ".", exist_ok=True)
+    tmp = INVENTORY_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(inv, f, indent=2)
+    os.replace(tmp, INVENTORY_PATH)
+
+
+def _extract_technologies(store: dict) -> dict:
+    """Extract product/version pairs from nuclei vulnerability findings.
+
+    Returns {(product, version): {hostnames: set, programs: set}}.
+    Only entries where a version can be determined are included, since
+    versionless entries produce too many false positives in NVD queries.
+    """
+    import re as _re
+
+    tech_map: dict = {}
+
+    # Template ID prefixes/exact IDs that carry no useful version information
+    _SKIP_PREFIXES = (
+        "dns-", "rdap-", "internal-ip", "missing-sri",
+        "waf-detect:", "dns-waf-detect:",
+    )
+    _SKIP_EXACT = {
+        "waf-detect", "akamai-detect", "akamai-cache-detect", "bigip-detect",
+        "spring-detect", "graphql-detect", "oauth2-detect", "oidc-detect",
+        "smtp-detect", "dns-rebinding", "bigip-detect",
+    }
+
+    def _normalize_product(tid: str) -> str:
+        t = tid.lower()
+        if ":" in t:
+            prefix, suffix = t.split(":", 1)
+            if suffix == "version":
+                # e.g. grafana-detect:version → grafana
+                return _re.sub(r"[-_](detect|version|check|info)$", "", prefix).strip("-_")
+            # e.g. waf-detect:nginxgeneric → nginx
+            product = _re.sub(r"generic$", "", suffix)
+            return _re.sub(r"[-_](waf|cdn|lb|firewall)$", "", product).strip("-_")
+        return _re.sub(
+            r"[-_](detect|version[-_]disclosure|disclosure|panel|"
+            r"login|check|fingerprint|banner|info|identify).*$",
+            "", t,
+        ).strip("-_") or t
+
+    def _extract_version(tid: str, raw: str) -> str:
+        t = tid.lower()
+
+        # OpenSSH banner: SSH-2.0-OpenSSH_7.4
+        if "openssh" in t:
+            m = _re.search(r"OpenSSH[_/](\d+\.\d+[\d.p]*)", raw, _re.IGNORECASE)
+            if m:
+                return m.group(1)
+
+        # TLS: tls10 → 1.0, tls12 → 1.2, tls13 → 1.3
+        if t == "tls-version":
+            m = _re.search(r"tls(\d)(\d*)", raw, _re.IGNORECASE)
+            if m:
+                return f"{m.group(1)}.{m.group(2) or '0'}"
+
+        # Generic: quoted brackets ["x.y.z"] at the end of rawContent
+        for b in _re.findall(r'\["([^"]+)"\]', raw):
+            if _re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", b):
+                continue  # skip IPs
+            if b.startswith("http") and "/" in b:
+                continue  # skip URLs
+            m = _re.search(r"^v?(\d+\.\d+[\.\d]*)", b)
+            if m:
+                return m.group(1)
+
+        # Fallback: unquoted brackets [x.y.z] ignoring type/severity tokens
+        _IGNORE = {"http", "tcp", "ssl", "dns", "info", "low", "medium",
+                   "high", "critical", "unknown", tid.lower()}
+        for b in _re.findall(r"\[([^\[\]\"]+)\]", raw):
+            if b.lower() in _IGNORE:
+                continue
+            m = _re.search(r"^v?(\d+\.\d+[\.\d]*)", b)
+            if m:
+                return m.group(1)
+
+        return ""
+
+    for target in store.get("targets", []):
+        prog = target.get("programName", "")
+        domain = target.get("domain", target.get("id", ""))
+
+        for v in (target.get("vulnerabilities") or []):
+            vid = v.get("id", "")
+            raw = v.get("rawContent", "")
+
+            if any(vid.startswith(p) for p in _SKIP_PREFIXES):
+                continue
+            if vid in _SKIP_EXACT:
+                continue
+
+            product = _normalize_product(vid)
+            version = _extract_version(vid, raw)
+            if not version:
+                continue
+
+            # Clean host: strip protocol and path
+            host = v.get("path", "") or domain
+            host = _re.sub(r"^https?://", "", host).split("/")[0].split("?")[0]
+
+            key = (product, version)
+            if key not in tech_map:
+                tech_map[key] = {"hostnames": set(), "programs": set()}
+            tech_map[key]["hostnames"].add(host)
+            if prog:
+                tech_map[key]["programs"].add(prog)
+
+    return tech_map
+
+
+def _query_nvd(product: str, version: str, api_key: str = "") -> list:
+    """Query the NVD CVE 2.0 API for a product/version combo.
+
+    Paginates through all results (cap 500) so no CVEs are silently dropped.
+    Rate limit: 5 req/30 s without key → 1.5 s inter-page; 50/30 s with key → 0.3 s.
+    """
+    import urllib.request, urllib.parse, urllib.error
+
+    headers = {"User-Agent": "gui-ax-inventory/1.0"}
+    if api_key:
+        headers["apiKey"] = api_key
+
+    inter_page_delay = 0.3 if api_key else 1.5
+    per_page         = 100
+    all_cves         = []
+    start_index      = 0
+
+    def _parse_page(items, prev_scan=""):
+        parsed = []
+        for item in items:
+            cve      = item.get("cve", {})
+            cve_id   = cve.get("id", "")
+            published = (cve.get("published") or "")[:10]
+            desc_list = (cve.get("descriptions") or [])
+            description = next(
+                (d["value"] for d in desc_list if d.get("lang") == "en"), ""
+            )[:400]
+
+            metrics = cve.get("metrics", {})
+            score, severity = 0.0, "UNKNOWN"
+            for mkey in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+                if mkey in metrics and metrics[mkey]:
+                    m = metrics[mkey][0].get("cvssData", {})
+                    score    = m.get("baseScore", 0.0)
+                    severity = m.get("baseSeverity", m.get("vectorString", "UNKNOWN"))
+                    break
+
+            # CPE version check — flag unverified when no CPE match found
+            cpe_match = False
+            for cfg_node in cve.get("configurations", [{}]):
+                for node in (
+                    [cfg_node] if "cpeMatch" in cfg_node
+                    else cfg_node.get("nodes", [])
+                ):
+                    for cpe_m in node.get("cpeMatch", []):
+                        if version in cpe_m.get("criteria", ""):
+                            cpe_match = True
+                            break
+
+            parsed.append({
+                "id":          cve_id,
+                "published":   published,
+                "severity":    severity.upper() if isinstance(severity, str) else "UNKNOWN",
+                "score":       round(float(score), 1),
+                "description": description,
+                "verified":    cpe_match,
+            })
+        return parsed
+
+    while len(all_cves) < 500:
+        params = urllib.parse.urlencode({
+            "keywordSearch":  f"{product} {version}",
+            "resultsPerPage": per_page,
+            "startIndex":     start_index,
+        })
+        url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?{params}"
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception as exc:
+            print(f"[inventory] NVD query failed for {product}/{version}"
+                  f" (startIndex={start_index}): {exc}")
+            break
+
+        items         = data.get("vulnerabilities", [])
+        total_results = data.get("totalResults", 0)
+        all_cves.extend(_parse_page(items))
+        start_index += len(items)
+
+        if not items or start_index >= total_results:
+            break
+
+        time.sleep(inter_page_delay)
+
+    return all_cves
+
+
+def _run_inventory_refresh():
+    """Background thread: extract technologies, query NVD, persist inventory."""
+    global _inventory_thread, _inventory_progress
+    api_key = os.environ.get("NVD_API_KEY", "")
+    delay   = 0.3 if api_key else 1.2    # conservative rate limiting
+
+    try:
+        prev_inv    = _load_inventory()
+        prev_scan   = prev_inv.get("last_full_scan") or ""
+        store       = load_store()
+        tech_map    = _extract_technologies(store)
+        items       = list(tech_map.items())
+
+        _inventory_progress = {"done": 0, "total": len(items)}
+        print(f"[inventory] Starting refresh: {len(items)} unique tech/version combos")
+
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        results = []
+
+        for i, ((product, version), meta) in enumerate(items):
+            cves = _query_nvd(product, version, api_key)
+            for c in cves:
+                c["is_new"] = prev_scan and c["published"] > prev_scan[:10]
+
+            results.append({
+                "product":      product,
+                "version":      version,
+                "hostnames":    sorted(meta["hostnames"]),
+                "programs":     sorted(meta["programs"]),
+                "cve_count":    len(cves),
+                "max_severity": max((c["score"] for c in cves), default=0.0),
+                "cves":         sorted(cves, key=lambda c: -c["score"]),
+                "last_checked": now_iso,
+            })
+            _inventory_progress["done"] = i + 1
+            time.sleep(delay)
+
+        inventory = {
+            "last_full_scan": now_iso,
+            "technologies":   sorted(results, key=lambda r: -r["max_severity"]),
+        }
+        _save_inventory(inventory)
+        print(f"[inventory] Refresh complete: {len(results)} entries saved")
+    except Exception as exc:
+        print(f"[inventory] Refresh failed: {exc}")
+        import traceback as _tb
+        _tb.print_exc()
+    finally:
+        _inventory_thread = None
+
+
+@app.route("/api/inventory", methods=["GET"])
+def get_inventory():
+    """Return the full persisted inventory with optional project filter.
+
+    ?projectToken=<token>    filter to technologies whose programs include
+                              a scan name explicitly linked to this project.
+    ?programPrefix=gw-acme- legacy fallback: match by programName prefix.
+    """
+    inv = _load_inventory()
+    project_token = request.args.get("projectToken", "").strip()
+    prefix = request.args.get("programPrefix", "").strip()
+    linked_scans_count = None
+
+    techs = inv.get("technologies", [])
+
+    if project_token:
+        linked_scan_names = _get_linked_scan_names(project_token)
+        linked_scans_count = len(linked_scan_names)
+        if linked_scan_names:
+            techs = [
+                t for t in techs
+                if any(p.lower() in linked_scan_names for p in (t.get("programs") or []))
+            ]
+        else:
+            techs = []
+    elif prefix:
+        techs = [
+            t for t in techs
+            if any(p.startswith(prefix) for p in (t.get("programs") or []))
+        ]
+
+    # Attach project labels so the frontend can show human-readable names
+    try:
+        all_projects = list(load_projects().values())
+    except Exception:
+        all_projects = []
+
+    resp = {
+        "last_full_scan": inv.get("last_full_scan"),
+        "technologies": techs,
+        "projects": [
+            {"token": p.get("token"), "name": p.get("name"),
+             "client": p.get("client")}
+            for p in all_projects
+        ],
+    }
+    if linked_scans_count is not None:
+        resp["linkedScansCount"] = linked_scans_count
+    return jsonify(resp)
+
+
+@app.route("/api/inventory/refresh", methods=["POST"])
+def start_inventory_refresh():
+    """Trigger a background CVE refresh. Returns immediately."""
+    global _inventory_thread
+    with _inventory_lock:
+        if _inventory_thread and _inventory_thread.is_alive():
+            return jsonify({"status": "already_running"})
+        _inventory_thread = threading.Thread(target=_run_inventory_refresh, daemon=True)
+        _inventory_thread.start()
+    return jsonify({"status": "started"})
+
+
+@app.route("/api/inventory/status", methods=["GET"])
+def get_inventory_status():
+    """Return refresh status: running flag, progress, and last scan timestamp."""
+    running = bool(_inventory_thread and _inventory_thread.is_alive())
+    inv     = _load_inventory()
+    prog    = _inventory_progress
+    return jsonify({
+        "running":        running,
+        "last_full_scan": inv.get("last_full_scan"),
+        "progress":       f"{prog['done']}/{prog['total']}" if running else None,
+        "total_entries":  len(inv.get("technologies", [])),
+    })
+
+
+@app.route("/api/inventory/ai-analyze", methods=["POST"])
+def inventory_ai_analyze():
+    """Proxy a chunk of inventory data to an AI provider for analysis.
+
+    Expects JSON body:
+      {provider, api_key, model, base_url, system, messages, max_tokens}
+
+    Returns {text} on success or {error} on failure.
+    Supports providers: anthropic, openai, ollama.
+    """
+    import urllib.request as _urlreq
+    import urllib.error   as _urlerr
+
+    body      = request.json or {}
+    provider  = body.get("provider", "anthropic")
+    api_key   = body.get("api_key", "")
+    model     = body.get("model", "")
+    base_url  = body.get("base_url", "").rstrip("/")
+    system    = body.get("system", "")
+    messages  = body.get("messages", [])
+    max_tok   = int(body.get("max_tokens", 1500))
+
+    if not messages:
+        return jsonify({"error": "no messages provided"}), 400
+
+    try:
+        if provider == "anthropic":
+            url = "https://api.anthropic.com/v1/messages"
+            headers = {
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            }
+            payload = {
+                "model": model or "claude-opus-4-8",
+                "max_tokens": max_tok,
+                "system": system,
+                "messages": messages,
+            }
+        elif provider == "openai":
+            url = (base_url or "https://api.openai.com") + "/v1/chat/completions"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            }
+            msgs = ([{"role": "system", "content": system}] if system else []) + messages
+            payload = {"model": model or "gpt-4o", "messages": msgs, "max_tokens": max_tok}
+        elif provider == "ollama":
+            url = (base_url or "http://localhost:11434") + "/api/chat"
+            headers = {"Content-Type": "application/json"}
+            msgs = ([{"role": "system", "content": system}] if system else []) + messages
+            payload = {"model": model or "llama3", "messages": msgs, "stream": False}
+        else:
+            return jsonify({"error": f"unknown provider: {provider}"}), 400
+
+        data = json.dumps(payload).encode()
+        req  = _urlreq.Request(url, data=data, headers=headers, method="POST")
+        with _urlreq.urlopen(req, timeout=90) as resp:
+            result = json.loads(resp.read().decode())
+
+        if provider == "anthropic":
+            text = (result.get("content") or [{}])[0].get("text", "")
+        elif provider == "openai":
+            text = (result.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        elif provider == "ollama":
+            text = result.get("message", {}).get("content", "")
+        else:
+            text = str(result)
+
+        return jsonify({"text": text})
+
+    except _urlerr.HTTPError as exc:
+        err_body = exc.read().decode()
+        return jsonify({"error": f"HTTP {exc.code}: {err_body}"}), 502
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 if __name__ == "__main__":

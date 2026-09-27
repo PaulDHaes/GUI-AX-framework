@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { ansiToHtml } from "../lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -9,6 +10,7 @@ import {
   RefreshCw,
   CheckCircle2,
   XCircle,
+  AlertTriangle,
   Loader2,
   Image as ImageIcon,
   Filter,
@@ -57,7 +59,8 @@ interface Screenshot {
 
 /** Parsed line for structured modules */
 interface ParsedLine {
-  raw: string;
+  raw: string;      // ANSI-stripped — used for search / regex matching
+  rawOrig?: string; // original line with ANSI codes — used for terminal display
   url?: string;
   statusCode?: number;
   host?: string;
@@ -97,6 +100,11 @@ type ScanCategory =
   | "generic";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, "");
+}
 
 const SCREENSHOT_MODULES = [
   "gowitness",
@@ -333,7 +341,7 @@ function statusColor(code: number): string {
   if (code >= 400 && code < 500)
     return "bg-amber-500/20 text-amber-300 border-amber-500/40";
   if (code >= 500) return "bg-red-500/20 text-red-300 border-red-500/40";
-  return "bg-slate-500/20 text-slate-300 border-slate-500/40";
+  return "bg-slate-500/20 text-foreground border-slate-500/40";
 }
 
 function severityColor(sev: string): string {
@@ -347,9 +355,9 @@ function severityColor(sev: string): string {
     case "low":
       return "bg-blue-500/40 text-blue-200 border-blue-400/50";
     case "info":
-      return "bg-slate-500/40 text-slate-300 border-slate-400/50";
+      return "bg-slate-500/40 text-foreground border-slate-400/50";
     default:
-      return "bg-slate-600/30 text-slate-300 border-slate-500/40";
+      return "bg-slate-600/30 text-foreground border-slate-500/40";
   }
 }
 
@@ -358,7 +366,7 @@ function portStateColor(state: string): string {
     return "bg-emerald-500/20 text-emerald-300 border-emerald-500/40";
   if (state === "filtered")
     return "bg-amber-500/20 text-amber-300 border-amber-500/40";
-  return "bg-slate-500/20 text-slate-400 border-slate-500/40";
+  return "bg-slate-500/20 text-muted-foreground border-slate-500/40";
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -493,7 +501,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
   const parsedLines = useMemo<ParsedLine[]>(() => {
     if (!scan?.logs) return [];
     return scan.logs
-      .map((l) => parseLine(l, category))
+      .map((l) => ({ ...parseLine(stripAnsi(l), category), rawOrig: l }))
       .filter((l) => l.raw.trim().length > 0);
   }, [scan?.logs, category]);
 
@@ -639,7 +647,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
       case "failed":
         return <XCircle className="w-5 h-5 text-red-500" />;
       default:
-        return <Terminal className="w-5 h-5 text-slate-500" />;
+        return <Terminal className="w-5 h-5 text-muted-foreground" />;
     }
   };
 
@@ -652,7 +660,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
       case "failed":
         return "bg-red-500/10 text-red-300 border-red-500/50";
       default:
-        return "bg-slate-500/10 text-slate-400 border-slate-500/50";
+        return "bg-slate-500/10 text-muted-foreground border-slate-500/50";
     }
   };
 
@@ -672,7 +680,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
       case "dns":
         return <Globe className="w-4 h-4 text-emerald-400" />;
       default:
-        return <Terminal className="w-4 h-4 text-slate-400" />;
+        return <Terminal className="w-4 h-4 text-muted-foreground" />;
     }
   };
 
@@ -680,11 +688,11 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
 
   if (!scanId) {
     return (
-      <Card className="bg-slate-800 border-slate-700">
+      <Card className="bg-card border-border">
         <CardContent className="p-12 text-center">
-          <Terminal className="w-16 h-16 mx-auto mb-4 text-slate-600" />
-          <p className="text-slate-400 text-lg mb-2">No scan selected</p>
-          <p className="text-slate-500 text-sm">
+          <Terminal className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+          <p className="text-muted-foreground text-lg mb-2">No scan selected</p>
+          <p className="text-muted-foreground text-sm">
             Select a scan to view its output
           </p>
         </CardContent>
@@ -694,10 +702,10 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
 
   if (!scan) {
     return (
-      <Card className="bg-slate-800 border-slate-700">
+      <Card className="bg-card border-border">
         <CardContent className="p-12 text-center">
           <Loader2 className="w-16 h-16 mx-auto mb-4 text-primary-500 animate-spin" />
-          <p className="text-slate-400">Loading scan details...</p>
+          <p className="text-muted-foreground">Loading scan details...</p>
         </CardContent>
       </Card>
     );
@@ -706,22 +714,42 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
-      {/* Failure Banner */}
-      {scan.status === "failed" && scan.failure_reason && (
-        <div className="bg-red-950/60 border border-red-800 rounded-lg p-4 space-y-2">
-          <div className="flex items-center gap-2 text-red-400 font-semibold text-sm">
-            <XCircle className="h-4 w-4 shrink-0" />
-            Scan failed — {scan.failure_reason}
+      {/* Failure / tool-error banner
+          - Red  (XCircle)       : scan.status === "failed"   — axiom-scan itself died
+          - Amber (AlertTriangle): scan.status === "completed" — tool ran but errored internally
+            (e.g. binary not installed, docker image missing). The bridge detected error
+            patterns in the log but the scan wrapper still exited 0, so status is "completed"
+            with 0 real results. Without this banner those look identical to a clean 0-result run. */}
+      {scan.failure_reason && (
+        <div className={
+          scan.status === "failed"
+            ? "bg-red-950/60 border border-red-800 rounded-lg p-4 space-y-2"
+            : "bg-amber-950/60 border border-amber-800 rounded-lg p-4 space-y-2"
+        }>
+          <div className={`flex items-center gap-2 font-semibold text-sm ${
+            scan.status === "failed" ? "text-red-400" : "text-amber-400"
+          }`}>
+            {scan.status === "failed"
+              ? <XCircle className="h-4 w-4 shrink-0" />
+              : <AlertTriangle className="h-4 w-4 shrink-0" />
+            }
+            {scan.status === "failed"
+              ? `Scan failed — ${scan.failure_reason}`
+              : `Tool error detected — ${scan.failure_reason}`
+            }
           </div>
           {scan.failure_lines && scan.failure_lines.length > 0 && (
             <div className="mt-2 space-y-1">
               {scan.failure_lines.map((line, i) => (
                 <div
                   key={i}
-                  className="font-mono text-xs text-red-300 bg-red-950/40 px-2 py-1 rounded"
-                >
-                  {line}
-                </div>
+                  className={`font-mono text-xs px-2 py-1 rounded ${
+                    scan.status === "failed"
+                      ? "text-red-300 bg-red-950/40"
+                      : "text-amber-300 bg-amber-950/40"
+                  }`}
+                  dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }}
+                />
               ))}
             </div>
           )}
@@ -729,21 +757,21 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
       )}
 
       {/* Header card */}
-      <Card className="bg-slate-800 border-slate-700">
+      <Card className="bg-card border-border">
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               {getStatusIcon()}
               <div>
-                <CardTitle className="text-white text-xl">
+                <CardTitle className="text-foreground text-xl">
                   {scan.name}
                 </CardTitle>
-                <div className="text-sm text-slate-400 flex items-center gap-2 mt-1">
+                <div className="text-sm text-muted-foreground flex items-center gap-2 mt-1">
                   <CategoryIcon />
                   <Badge variant="outline" className="text-xs">
                     {scan.module}
                   </Badge>
-                  <span className="text-slate-500 text-xs">{category}</span>
+                  <span className="text-muted-foreground text-xs">{category}</span>
                 </div>
               </div>
             </div>
@@ -753,12 +781,12 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
           </div>
 
           {/* Stats strip */}
-          <div className="flex flex-wrap gap-4 pt-3 border-t border-slate-700 mt-3">
+          <div className="flex flex-wrap gap-4 pt-3 border-t border-border mt-3">
             {scan.results !== undefined && (
               <div>
-                <span className="text-slate-500 text-xs">Results</span>
+                <span className="text-muted-foreground text-xs">Results</span>
                 <div
-                  className={`text-lg font-bold ${scan.results > 0 ? "text-emerald-400" : "text-slate-400"}`}
+                  className={`text-lg font-bold ${scan.results > 0 ? "text-emerald-400" : "text-muted-foreground"}`}
                 >
                   {scan.results}
                 </div>
@@ -766,7 +794,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
             )}
             {scan.instances !== undefined && scan.instances > 0 && (
               <div>
-                <span className="text-slate-500 text-xs">Instances</span>
+                <span className="text-muted-foreground text-xs">Instances</span>
                 <div className="text-lg font-bold text-amber-400">
                   {scan.instances}
                 </div>
@@ -774,7 +802,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
             )}
             {scan.threads !== undefined && scan.threads > 0 && (
               <div>
-                <span className="text-slate-500 text-xs">Threads</span>
+                <span className="text-muted-foreground text-xs">Threads</span>
                 <div className="text-lg font-bold text-blue-400">
                   {scan.threads}
                 </div>
@@ -782,7 +810,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
             )}
             {scan.runtime && (
               <div>
-                <span className="text-slate-500 text-xs">Runtime</span>
+                <span className="text-muted-foreground text-xs">Runtime</span>
                 <div className="text-lg font-bold text-primary-400 font-mono">
                   {scan.runtime}
                 </div>
@@ -790,15 +818,15 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
             )}
             {typeof scan.targets === "number" && scan.targets > 0 && (
               <div>
-                <span className="text-slate-500 text-xs">Targets</span>
-                <div className="text-lg font-bold text-slate-300">
+                <span className="text-muted-foreground text-xs">Targets</span>
+                <div className="text-lg font-bold text-foreground">
                   {scan.targets}
                 </div>
               </div>
             )}
             {category === "screenshot" && screenshots.length > 0 && (
               <div>
-                <span className="text-slate-500 text-xs">Screenshots</span>
+                <span className="text-muted-foreground text-xs">Screenshots</span>
                 <div className="text-lg font-bold text-purple-400">
                   {screenshots.length}
                 </div>
@@ -810,10 +838,10 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
 
       {/* Command */}
       {scan.command && (
-        <Card className="bg-slate-800 border-slate-700">
+        <Card className="bg-card border-border">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-white text-base flex items-center gap-2">
+              <CardTitle className="text-foreground text-base flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-primary-400" />
                 Command
               </CardTitle>
@@ -829,7 +857,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="bg-slate-950 border border-slate-700 rounded-lg p-4 overflow-x-auto">
+            <div className="bg-muted/30 border border-border rounded-lg p-4 overflow-x-auto">
               <code className="text-sm text-emerald-400 font-mono break-all whitespace-pre-wrap">
                 {scan.command}
               </code>
@@ -840,9 +868,9 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
 
       {/* ── SCREENSHOTS ────────────────────────────────────────────────────── */}
       {category === "screenshot" && screenshots.length > 0 && (
-        <Card className="bg-slate-800 border-slate-700">
+        <Card className="bg-card border-border">
           <CardHeader className="pb-3">
-            <CardTitle className="text-white text-base flex items-center gap-2">
+            <CardTitle className="text-foreground text-base flex items-center gap-2">
               <ImageIcon className="w-4 h-4 text-purple-400" />
               Screenshots ({screenshots.length})
             </CardTitle>
@@ -852,11 +880,11 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
               {screenshots.map((shot) => (
                 <div
                   key={shot.rel}
-                  className="group relative border border-slate-700 rounded-lg overflow-hidden bg-slate-900 cursor-pointer hover:border-purple-500/60 transition-colors"
+                  className="group relative border border-border rounded-lg overflow-hidden bg-card cursor-pointer hover:border-purple-500/60 transition-colors"
                   onClick={() => setExpandedShot(shot)}
                 >
                   {/* Taller image card: h-64 gives plenty of vertical space to see page content */}
-                  <div className="w-full h-64 bg-slate-950 flex items-center justify-center overflow-hidden">
+                  <div className="w-full h-64 bg-muted/30 flex items-center justify-center overflow-hidden">
                     <img
                       src={`${apiUrl}${shot.url}`}
                       alt={shot.domain}
@@ -867,13 +895,13 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                         (
                           e.target as HTMLImageElement
                         ).parentElement!.innerHTML =
-                          `<div class="text-slate-600 text-xs text-center p-4">No preview</div>`;
+                          `<div class="text-muted-foreground text-xs text-center p-4">No preview</div>`;
                       }}
                     />
                   </div>
-                  <div className="px-2 py-1.5 bg-slate-900/90 border-t border-slate-700">
+                  <div className="px-2 py-1.5 bg-card/90 border-t border-border">
                     <p
-                      className="text-xs text-slate-300 font-mono truncate"
+                      className="text-xs text-foreground font-mono truncate"
                       title={shot.domain}
                     >
                       {shot.domain}
@@ -881,7 +909,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                   </div>
                   {/* Expand hint */}
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                    <span className="text-white text-xs bg-black/60 rounded px-2 py-1">
+                    <span className="text-foreground text-xs bg-black/60 rounded px-2 py-1">
                       Click to expand
                     </span>
                   </div>
@@ -899,15 +927,15 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
           onClick={() => setExpandedShot(null)}
         >
           <div
-            className="relative max-w-5xl w-full bg-slate-900 rounded-xl border border-slate-600 overflow-hidden"
+            className="relative max-w-5xl w-full bg-card rounded-xl border border-border overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700">
-              <span className="font-mono text-sm text-slate-300">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+              <span className="font-mono text-sm text-foreground">
                 {expandedShot.domain}
               </span>
               <button
-                className="text-slate-400 hover:text-white transition-colors text-lg leading-none"
+                className="text-muted-foreground hover:text-foreground transition-colors text-lg leading-none"
                 onClick={() => setExpandedShot(null)}
               >
                 ✕
@@ -925,10 +953,10 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
       )}
 
       {/* ── RESULTS / LOGS ─────────────────────────────────────────────────── */}
-      <Card className="bg-slate-800 border-slate-700">
+      <Card className="bg-card border-border">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-white text-base flex items-center gap-2">
+            <CardTitle className="text-foreground text-base flex items-center gap-2">
               <Terminal className="w-4 h-4 text-primary-400" />
               Scan Results
               {activeFilterCount > 0 && (
@@ -996,17 +1024,17 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
           {/* ── Search bar (always visible when there are lines) ── */}
           {parsedLines.length > 0 && (
             <div className="relative mt-2">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <input
                 type="text"
                 placeholder="Search results…"
                 value={logSearch}
                 onChange={(e) => setLogSearch(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-primary-500"
+                className="w-full bg-background border border-border rounded-lg pl-8 pr-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary-500"
               />
               {logSearch && (
                 <button
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   onClick={() => setLogSearch("")}
                 >
                   ✕
@@ -1019,7 +1047,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
           {(category === "http" || category === "fuzzing") &&
             allStatusCodes.length > 0 && (
               <div className="mt-3 space-y-1.5">
-                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Filter className="w-3 h-3" /> Status codes
                   {statusFilter.size > 0 && (
                     <button
@@ -1044,7 +1072,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                           active
                             ? statusColor(code) +
                               " ring-1 ring-offset-0 ring-current"
-                            : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
+                            : "bg-muted/30 border-border text-muted-foreground hover:border-border/70"
                         }`}
                       >
                         {code}
@@ -1059,7 +1087,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
           {/* ── Nuclei severity filter ── */}
           {category === "vuln" && allSeverities.length > 0 && (
             <div className="mt-3 space-y-1.5">
-              <div className="flex items-center gap-1.5 text-xs text-slate-500">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Filter className="w-3 h-3" /> Severity
                 {sevFilter.size > 0 && (
                   <button
@@ -1084,7 +1112,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                         active
                           ? severityColor(sev) +
                             " ring-1 ring-offset-0 ring-current"
-                          : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
+                          : "bg-muted/30 border-border text-muted-foreground hover:border-border/70"
                       }`}
                     >
                       {sev}
@@ -1099,7 +1127,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
           {/* ── Port state filter ── */}
           {category === "port" && allStates.length > 0 && (
             <div className="mt-3 space-y-1.5">
-              <div className="flex items-center gap-1.5 text-xs text-slate-500">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Filter className="w-3 h-3" /> Port state
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -1116,7 +1144,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                         active
                           ? portStateColor(st) +
                             " ring-1 ring-offset-0 ring-current"
-                          : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
+                          : "bg-muted/30 border-border text-muted-foreground hover:border-border/70"
                       }`}
                     >
                       {st}
@@ -1126,7 +1154,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                 })}
               </div>
               {allStates.includes("open") && (
-                <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none mt-1">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none mt-1">
                   <input
                     type="checkbox"
                     checked={showOpenOnly}
@@ -1149,20 +1177,23 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
             <div
               ref={outputRef}
               onScroll={handleOutputScroll}
-              className="bg-slate-950 border border-slate-700 rounded-lg overflow-y-auto"
+              className="bg-muted/30 border border-border rounded-lg overflow-y-auto"
               style={{
                 maxHeight: category === "screenshot" ? "28rem" : "36rem",
               }}
             >
-              <pre className="m-0 p-3 text-xs font-mono whitespace-pre-wrap break-words">
-                {scan?.logs?.join("\n")}
-              </pre>
+              <pre
+                className="m-0 p-3 text-xs font-mono whitespace-pre-wrap break-words"
+                dangerouslySetInnerHTML={{
+                  __html: (scan?.logs ?? []).map(ansiToHtml).join("\n"),
+                }}
+              />
             </div>
           ) : displayLines.length > 0 ? (
             <div
               ref={outputRef}
               onScroll={handleOutputScroll}
-              className="bg-slate-950 border border-slate-700 rounded-lg overflow-y-auto"
+              className="bg-muted/30 border border-border rounded-lg overflow-y-auto"
               style={{
                 maxHeight: category === "screenshot" ? "28rem" : "36rem",
               }}
@@ -1170,26 +1201,26 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
               {category === "http" || category === "fuzzing" ? (
                 // Table-style for HTTP/fuzzing results
                 <table className="w-full text-xs font-mono">
-                  <thead className="sticky top-0 bg-slate-900 border-b border-slate-700">
+                  <thead className="sticky top-0 bg-card border-b border-border">
                     <tr>
-                      <th className="px-3 py-2 text-left text-slate-400 font-semibold w-16">
+                      <th className="px-3 py-2 text-left text-muted-foreground font-semibold w-16">
                         Code
                       </th>
-                      <th className="px-3 py-2 text-left text-slate-400 font-semibold">
+                      <th className="px-3 py-2 text-left text-muted-foreground font-semibold">
                         URL / Path
                       </th>
                       {category === "http" && (
-                        <th className="px-3 py-2 text-left text-slate-400 font-semibold hidden md:table-cell">
+                        <th className="px-3 py-2 text-left text-muted-foreground font-semibold hidden md:table-cell">
                           Title
                         </th>
                       )}
                       {category === "fuzzing" && (
-                        <th className="px-3 py-2 text-left text-slate-400 font-semibold hidden md:table-cell w-24">
+                        <th className="px-3 py-2 text-left text-muted-foreground font-semibold hidden md:table-cell w-24">
                           Size
                         </th>
                       )}
                       {category === "fuzzing" && (
-                        <th className="px-3 py-2 text-left text-slate-400 font-semibold hidden lg:table-cell w-20">
+                        <th className="px-3 py-2 text-left text-muted-foreground font-semibold hidden lg:table-cell w-20">
                           Words
                         </th>
                       )}
@@ -1199,7 +1230,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                     {displayLines.map((l, i) => (
                       <tr
                         key={i}
-                        className="border-b border-slate-800/60 hover:bg-slate-800/30 transition-colors"
+                        className="border-b border-border/30 hover:bg-muted/20 transition-colors"
                       >
                         <td className="px-3 py-1.5">
                           {l.statusCode !== undefined ? (
@@ -1209,26 +1240,26 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                               {l.statusCode}
                             </span>
                           ) : (
-                            <span className="text-slate-600">—</span>
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </td>
-                        <td className="px-3 py-1.5 text-slate-200 break-all max-w-xs">
-                          {l.url || l.path || l.raw}
+                        <td className="px-3 py-1.5 text-foreground break-all max-w-xs">
+                          <span dangerouslySetInnerHTML={{ __html: ansiToHtml(l.url || l.path || l.raw) }} />
                         </td>
                         {category === "http" && (
-                          <td className="px-3 py-1.5 text-slate-400 hidden md:table-cell max-w-[200px] truncate">
+                          <td className="px-3 py-1.5 text-muted-foreground hidden md:table-cell max-w-[200px] truncate">
                             {l.title || ""}
                           </td>
                         )}
                         {category === "fuzzing" && (
-                          <td className="px-3 py-1.5 text-slate-400 hidden md:table-cell">
+                          <td className="px-3 py-1.5 text-muted-foreground hidden md:table-cell">
                             {l.size !== undefined
                               ? l.size.toLocaleString()
                               : ""}
                           </td>
                         )}
                         {category === "fuzzing" && (
-                          <td className="px-3 py-1.5 text-slate-400 hidden lg:table-cell">
+                          <td className="px-3 py-1.5 text-muted-foreground hidden lg:table-cell">
                             {l.words !== undefined
                               ? l.words.toLocaleString()
                               : ""}
@@ -1245,20 +1276,20 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                     {filteredNmapHosts.map((host, i) => (
                       <div
                         key={i}
-                        className="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden"
+                        className="bg-card border border-border rounded-lg overflow-hidden"
                       >
-                        <div className="flex items-center justify-between px-3 py-2 bg-slate-800/60 border-b border-slate-700">
+                        <div className="flex items-center justify-between px-3 py-2 bg-muted/40 border-b border-border">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-mono text-cyan-300 font-bold">
                               {host.hostname}
                             </span>
                             {host.ip && host.ip !== host.hostname && (
-                              <span className="text-xs text-slate-500 font-mono">
+                              <span className="text-xs text-muted-foreground font-mono">
                                 {host.ip}
                               </span>
                             )}
                           </div>
-                          <span className="text-xs text-slate-500 font-mono">
+                          <span className="text-xs text-muted-foreground font-mono">
                             {
                               host.ports.filter((p) => p.state === "open")
                                 .length
@@ -1283,7 +1314,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                                 p.service !== "unknown" &&
                                 p.service !== "" && (
                                   <span className="ml-1 opacity-70 font-normal">
-                                    {p.service}
+                                    <span dangerouslySetInnerHTML={{ __html: ansiToHtml(p.service) }} />
                                   </span>
                                 )}
                             </span>
@@ -1293,17 +1324,19 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                     ))}
                   </div>
                 ) : (
-                  // Fallback: raw lines when host-grouping yields nothing
+                  // Fallback: ANSI-coloured raw lines when host-grouping yields nothing
                   <div className="p-3 space-y-0.5">
                     {displayLines.map((l, i) => (
                       <div
                         key={i}
-                        className="text-xs font-mono text-slate-300 leading-5"
+                        className="text-xs font-mono text-foreground leading-5"
                       >
-                        <span className="text-slate-700 mr-2 select-none">
+                        <span className="text-muted-foreground/40 mr-2 select-none">
                           [{i + 1}]
                         </span>
-                        {l.raw}
+                        <span
+                          dangerouslySetInnerHTML={{ __html: ansiToHtml(l.rawOrig ?? l.raw) }}
+                        />
                       </div>
                     ))}
                   </div>
@@ -1311,15 +1344,15 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
               ) : category === "vuln" ? (
                 // Nuclei findings table
                 <table className="w-full text-xs font-mono">
-                  <thead className="sticky top-0 bg-slate-900 border-b border-slate-700">
+                  <thead className="sticky top-0 bg-card border-b border-border">
                     <tr>
-                      <th className="px-3 py-2 text-left text-slate-400 font-semibold w-24">
+                      <th className="px-3 py-2 text-left text-muted-foreground font-semibold w-24">
                         Severity
                       </th>
-                      <th className="px-3 py-2 text-left text-slate-400 font-semibold w-40">
+                      <th className="px-3 py-2 text-left text-muted-foreground font-semibold w-40">
                         Template
                       </th>
-                      <th className="px-3 py-2 text-left text-slate-400 font-semibold">
+                      <th className="px-3 py-2 text-left text-muted-foreground font-semibold">
                         Target
                       </th>
                     </tr>
@@ -1329,7 +1362,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                       l.severity ? (
                         <tr
                           key={i}
-                          className="border-b border-slate-800/60 hover:bg-slate-800/30"
+                          className="border-b border-border/30 hover:bg-muted/20"
                         >
                           <td className="px-3 py-1.5">
                             <span
@@ -1338,17 +1371,17 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                               {l.severity}
                             </span>
                           </td>
-                          <td className="px-3 py-1.5 text-slate-300 truncate max-w-[160px]">
+                          <td className="px-3 py-1.5 text-foreground truncate max-w-[160px]">
                             {l.template}
                           </td>
-                          <td className="px-3 py-1.5 text-slate-200 break-all">
+                          <td className="px-3 py-1.5 text-foreground break-all">
                             {l.url}
                           </td>
                         </tr>
                       ) : (
-                        <tr key={i} className="border-b border-slate-800/30">
-                          <td colSpan={3} className="px-3 py-1 text-slate-500">
-                            {l.raw}
+                        <tr key={i} className="border-b border-border/20">
+                          <td colSpan={3} className="px-3 py-1 text-muted-foreground">
+                            <span dangerouslySetInnerHTML={{ __html: ansiToHtml(l.rawOrig ?? l.raw) }} />
                           </td>
                         </tr>
                       ),
@@ -1358,8 +1391,8 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
               ) : category === "dns" && filteredDnsHostnames.length > 0 ? (
                 // DNS / subdomain results — deduplicated hostname grid
                 <div>
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700 bg-slate-900/60 sticky top-0">
-                    <span className="text-xs text-slate-500 font-mono">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-card/80 sticky top-0">
+                    <span className="text-xs text-muted-foreground font-mono">
                       {filteredDnsHostnames.length} hostname
                       {filteredDnsHostnames.length !== 1 ? "s" : ""}
                       {logSearch ? ` matching "${logSearch}"` : ""}
@@ -1370,7 +1403,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                           filteredDnsHostnames.join("\n"),
                         )
                       }
-                      className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
                     >
                       <Copy className="w-3 h-3" /> Copy all
                     </button>
@@ -1379,9 +1412,9 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                     {filteredDnsHostnames.map((h, i) => (
                       <div
                         key={i}
-                        className="flex items-center gap-2 text-xs font-mono text-emerald-300 px-2 py-1 hover:bg-slate-800/40 rounded group"
+                        className="flex items-center gap-2 text-xs font-mono text-emerald-300 px-2 py-1 hover:bg-muted/30 rounded group"
                       >
-                        <span className="text-slate-700 select-none w-6 text-right flex-shrink-0">
+                        <span className="text-muted-foreground/40 select-none w-6 text-right flex-shrink-0">
                           {i + 1}
                         </span>
                         <span className="flex-1 truncate" title={h}>
@@ -1389,7 +1422,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                         </span>
                         <button
                           onClick={() => navigator.clipboard.writeText(h)}
-                          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-white transition-opacity flex-shrink-0"
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity flex-shrink-0"
                         >
                           <Copy className="w-3 h-3" />
                         </button>
@@ -1398,7 +1431,7 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                   </div>
                 </div>
               ) : (
-                // Generic / screenshot module — plain log lines
+                // Generic / screenshot module — ANSI-coloured log lines
                 <div className="p-3 space-y-0.5">
                   {displayLines.map((l, i) => (
                     <div
@@ -1410,24 +1443,26 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
                             ? "text-amber-400"
                             : l.raw.toLowerCase().includes("success")
                               ? "text-emerald-400"
-                              : "text-slate-300"
+                              : "text-foreground"
                       }`}
                     >
-                      <span className="text-slate-700 mr-2 select-none">
+                      <span className="text-muted-foreground/40 mr-2 select-none">
                         [{i + 1}]
                       </span>
-                      {l.raw}
+                      <span
+                        dangerouslySetInnerHTML={{ __html: ansiToHtml(l.rawOrig ?? l.raw) }}
+                      />
                     </div>
                   ))}
                 </div>
               )}
             </div>
           ) : scan.logs && scan.logs.length > 0 ? (
-            <div className="text-center py-8 text-slate-500 text-sm">
+            <div className="text-center py-8 text-muted-foreground text-sm">
               No results match the current filters
             </div>
           ) : (
-            <div className="text-center py-8 text-slate-600 text-sm">
+            <div className="text-center py-8 text-muted-foreground text-sm">
               No output yet
             </div>
           )}
@@ -1435,25 +1470,25 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
       </Card>
 
       {/* Scan metadata */}
-      <Card className="bg-slate-800 border-slate-700">
+      <Card className="bg-card border-border">
         <CardHeader className="pb-2">
-          <CardTitle className="text-white text-base">Scan Details</CardTitle>
+          <CardTitle className="text-foreground text-base">Scan Details</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-slate-500">Scan ID</span>
-              <div className="text-white font-mono mt-1 text-xs break-all">
+              <span className="text-muted-foreground">Scan ID</span>
+              <div className="text-foreground font-mono mt-1 text-xs break-all">
                 {scan.id}
               </div>
             </div>
             <div>
-              <span className="text-slate-500">Module</span>
-              <div className="text-white font-mono mt-1">{scan.module}</div>
+              <span className="text-muted-foreground">Module</span>
+              <div className="text-foreground font-mono mt-1">{scan.module}</div>
             </div>
             <div>
-              <span className="text-slate-500">Start Time</span>
-              <div className="text-white mt-1 text-xs">
+              <span className="text-muted-foreground">Start Time</span>
+              <div className="text-foreground mt-1 text-xs">
                 {scan.date ||
                   (scan.startedAt
                     ? new Date(scan.startedAt).toLocaleString()
@@ -1461,15 +1496,15 @@ export default function ScanOutput({ apiUrl, scanId }: ScanOutputProps) {
               </div>
             </div>
             <div>
-              <span className="text-slate-500">Runtime</span>
-              <div className="text-white font-mono mt-1">
+              <span className="text-muted-foreground">Runtime</span>
+              <div className="text-foreground font-mono mt-1">
                 {scan.runtime || "N/A"}
               </div>
             </div>
             {scan.output && (
               <div className="col-span-2">
-                <span className="text-slate-500">Output Path</span>
-                <div className="text-slate-300 font-mono mt-1 text-xs break-all">
+                <span className="text-muted-foreground">Output Path</span>
+                <div className="text-foreground font-mono mt-1 text-xs break-all">
                   {scan.output}
                 </div>
               </div>

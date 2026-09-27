@@ -31,7 +31,7 @@ BRIDGE_URL    = os.environ.get("BRIDGE_URL",      "http://localhost:5000")
 BRIDGE_TOKEN  = os.environ.get("WF_BRIDGE_TOKEN", "")   # Bearer token for bridge auth
 LOG_DIR       = os.environ.get("WF_LOG_DIR",      "/tmp/workflow-logs")
 POLL_INTERVAL = int(os.environ.get("WF_POLL_INTERVAL", "8"))   # seconds
-SCAN_TIMEOUT  = int(os.environ.get("WF_SCAN_TIMEOUT",  "1800")) # 30 min
+SCAN_TIMEOUT  = int(os.environ.get("WF_SCAN_TIMEOUT",  "7200")) # 2 hours
 
 
 # ─── Utilities ─────────────────────────────────────────────────────────────────
@@ -623,6 +623,11 @@ def run_step(
         return
 
     # ── 4. Wait for completion (filesystem-first) ───────────────────────────────
+    completed     = None
+    step_failed   = False
+    fail_reason   = ""
+    result_count  = 0
+    output_path   = ""
     try:
         log.info("  → waiting for scan to complete …")
         completed = wait_for_scan(scan_id, launch_time, log, abort_event)
@@ -645,8 +650,34 @@ def run_step(
 
         log.info(f"  → scan completed!  resultCount={result_count}")
     except RuntimeError as e:
-        log.error(f"  ✗ scan wait failed: {e}")
-        status.step(step_id, status="failed", error=str(e), endedAt=_utciso())
+        fail_reason = str(e)
+        step_failed = True
+        log.error(f"  ✗ scan wait failed: {fail_reason}")
+        # Even on timeout the scan may have finished — notify the bridge if an
+        # output file already landed in the imports folder.
+        import glob as _glob
+        import_pattern = os.path.join(
+            os.environ.get("IMPORTS_DIR", "/app/imports"),
+            f"{scan_id}*"
+        )
+        matched = _glob.glob(import_pattern)
+        if matched:
+            found_output = matched[0]
+            try:
+                with open(found_output) as _f:
+                    found_count = sum(1 for _ in _f if _.strip())
+            except Exception:
+                found_count = 0
+            log.info(f"  → output found despite timeout ({found_output}, {found_count} lines) — notifying bridge")
+            _notify_bridge_complete(scan_id, found_count, found_output, log)
+    finally:
+        # ── 6. Auto-terminate fleet instances (always, even on timeout) ──────
+        if config.get("autoTerminateFleet"):
+            log.info(f"  → auto-terminating {fleet_sz} instance(s) with prefix {step_fleet_prefix!r} …")
+            _terminate_fleet_instances(step_fleet_prefix, fleet_sz, log)
+
+    if step_failed:
+        status.step(step_id, status="failed", error=fail_reason, endedAt=_utciso())
         outputs[step_id] = []
         return
 
@@ -669,11 +700,6 @@ def run_step(
     status.step(step_id, status="completed", resultCount=result_count,
                 outputCount=len(step_out), endedAt=_utciso())
     log.info(f"  ✓ DONE  module={module_name}  results={result_count}  outputs_for_downstream={len(step_out)}")
-
-    # ── 6. Auto-terminate fleet instances ───────────────────────────────────────
-    if config.get("autoTerminateFleet"):
-        log.info(f"  → auto-terminating {fleet_sz} instance(s) with prefix {step_fleet_prefix!r} …")
-        _terminate_fleet_instances(step_fleet_prefix, fleet_sz, log)
 
 
 # ─── Main runner ────────────────────────────────────────────────────────────────

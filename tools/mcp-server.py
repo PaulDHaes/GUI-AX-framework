@@ -40,7 +40,18 @@ import os
 import sys
 from typing import Any, Optional
 
-import httpx
+try:
+    import httpx
+except ImportError:
+    # Container was built before httpx was added to the Dockerfile.
+    # Install it now — subsequent starts will find it cached.
+    import subprocess as _sub
+    print("[mcp] httpx not found — installing...", file=sys.stderr)
+    _sub.check_call(
+        [sys.executable, "-m", "pip", "install", "--break-system-packages", "--quiet", "httpx"]
+    )
+    import httpx
+
 from mcp.server.fastmcp import FastMCP
 
 # ── Configuration ──────────────────────────────────────────────────────────────

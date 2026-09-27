@@ -49,7 +49,7 @@ This project is a **local-first dashboard** that is intended to run on your own 
 
 ## Security best practices for users
 
-- **Never expose the bridge port (default 5000) to the internet.** The API has no authentication and is designed for localhost-only use.
-- Use a firewall rule or VPN if you need remote access.
+- **Be careful exposing the bridge port (default 5000) to the internet.** Enable the login gate by setting `GUI_AX_PASSWORD` (and a stable `GUI_AX_SECRET_KEY`) before exposing it; left blank, the bridge runs open with full admin access. Prefer localhost-only use, or put it behind the nginx production build.
+- Use a firewall rule or VPN if you need remote access, and restrict the bridge/MCP ports to trusted IPs.
 - Keep your `.env` file out of version control (it is `.gitignore`d by default).
-- Rotate your `GEMINI_API_KEY` if it is accidentally exposed.
+- Rotate any AI provider key (e.g. `ANTHROPIC_API_KEY`) if it is accidentally exposed.

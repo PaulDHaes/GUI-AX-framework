@@ -21,6 +21,7 @@ dist-ssr
 # Runtime data
 data/
 imports/processed/
+tools/imports/
 
 # Python
 __pycache__/
@@ -43,3 +44,13 @@ imports/*
 .github/*
 package.json
 package-lock.json
+
+# Personal
+todo*
+Claude.md
+DESIGN*
+WORKFLOW.md
+ROADMAP.md
+docker-compose.prod.yml
+dockerfile.prod
+*.claude/

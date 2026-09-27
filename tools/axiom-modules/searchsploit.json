@@ -1,0 +1,6 @@
+[
+    {
+        "command": "cat input | while read -r term; do searchsploit --json \"$term\"; done > output",
+        "ext": "jsonl"
+    }
+]

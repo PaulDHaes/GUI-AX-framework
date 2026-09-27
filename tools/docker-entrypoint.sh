@@ -96,7 +96,7 @@ tmux new-session -d -s dashboard -n bridge \
     "echo '🚀 Starting axiom-bridge on port ${PORT:-5000}...' && python3 $APP_DIR/tools/axiom-bridge.py; zsh"
 
 tmux new-window -t dashboard -n vite \
-    "echo '🖥️  Starting Vite dev server on port 3000...' && cd $APP_DIR && npm run dev; zsh"
+    "echo '📦 Syncing npm dependencies...' && cd $APP_DIR && npm install --prefer-offline --no-audit --no-fund --silent && echo '🖥️  Starting Vite dev server on port 3000...' && npm run dev; zsh"
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"

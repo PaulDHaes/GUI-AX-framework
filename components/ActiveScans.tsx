@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -21,6 +21,7 @@ import {
   ChevronUp,
   Target,
   GitBranch,
+  AlertTriangle,
 } from "lucide-react";
 import {
   Table,
@@ -63,6 +64,23 @@ interface ActiveScansProps {
   onScanSelected?: (scanId: string) => void;
 }
 
+// Axiom stores timestamps as "MM-DD_HH-MM-SS-ffffff" in folder names, which
+// JavaScript's Date constructor can't parse. Try the raw string first; if that
+// fails, attempt to parse the axiom format using the current year.
+function parseScanDate(ts?: string): Date | null {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (!isNaN(d.getTime())) return d;
+  const m = ts.match(/^(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/);
+  if (m) {
+    const year = new Date().getFullYear();
+    const iso = `${year}-${m[1]}-${m[2]}T${m[3]}:${m[4]}:${m[5]}Z`;
+    const d2 = new Date(iso);
+    if (!isNaN(d2.getTime())) return d2;
+  }
+  return null;
+}
+
 // Workflow scans launched by WorkflowBuilder are named
 //   wf-<workflowName>-<6-char step id>-<module>
 // Detect that pattern so we can badge them and link the user back to context.
@@ -102,6 +120,11 @@ export default function ActiveScans({
   const [expandedTargets, setExpandedTargets] = useState<
     Record<string, string[] | null>
   >({});
+
+  // Tracks the last time each running scan's result count changed.
+  // Keyed by scan.id: { count, since (epoch ms) }.
+  // Stored in a ref so updates don't cause extra re-renders.
+  const resultSnapshots = useRef<Record<string, { count: number; since: number }>>({});
 
   const fetchTargetList = async (scanId: string) => {
     if (expandedTargets[scanId] !== undefined) {
@@ -242,6 +265,24 @@ export default function ActiveScans({
       console.log(`  - Completed: ${completed.length}`);
       completed.forEach((s) => console.log(`    * ${s.id}`));
 
+      // ── Stale-results tracking ─────────────────────────────────────────────
+      // For each running scan, record the first time we saw the current result
+      // count. When count hasn't changed for ≥1 h we show a warning on the card.
+      const now = Date.now();
+      const runningIds = new Set(running.map((s) => s.id));
+      // Remove finished scans from the snapshot map
+      Object.keys(resultSnapshots.current).forEach((id) => {
+        if (!runningIds.has(id)) delete resultSnapshots.current[id];
+      });
+      running.forEach((scan) => {
+        const current = scan.results ?? 0;
+        const snap = resultSnapshots.current[scan.id];
+        if (!snap || snap.count !== current) {
+          // Count changed (or first time seen) — reset the clock
+          resultSnapshots.current[scan.id] = { count: current, since: now };
+        }
+      });
+
       setScans(uniqueScans || []);
     } catch (err) {
       console.error("[ActiveScans] Failed to fetch scans:", err);
@@ -304,8 +345,9 @@ export default function ActiveScans({
 
   const formatDuration = (startedAt?: string, completedAt?: string) => {
     if (!startedAt) return "N/A";
-    const start = new Date(startedAt);
-    const end = completedAt ? new Date(completedAt) : new Date();
+    const start = parseScanDate(startedAt);
+    if (!start) return "N/A";
+    const end = completedAt ? (parseScanDate(completedAt) ?? new Date()) : new Date();
     const diff = end.getTime() - start.getTime();
     const minutes = Math.floor(diff / 60000);
     const seconds = Math.floor((diff % 60000) / 1000);
@@ -386,15 +428,15 @@ export default function ActiveScans({
 
       {/* Running Scans */}
       {runningScans.length > 0 && (
-        <Card className="bg-slate-800 border-slate-700">
+        <Card className="bg-card border-border">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="flex items-center gap-2 text-white">
+                <CardTitle className="flex items-center gap-2 text-foreground">
                   <Activity className="h-5 w-5 animate-pulse text-emerald-500" />
                   Active Scans ({runningScans.length})
                 </CardTitle>
-                <CardDescription className="text-slate-400">
+                <CardDescription className="text-muted-foreground">
                   Currently running distributed scans across your fleet
                 </CardDescription>
               </div>
@@ -411,21 +453,28 @@ export default function ActiveScans({
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {runningScans.map((scan) => (
+              {runningScans.map((scan) => {
+                // Stale-results check: warn if result count unchanged for ≥ 1 hour
+                const snap = resultSnapshots.current[scan.id];
+                const staleMs = snap ? Date.now() - snap.since : 0;
+                const isStale = staleMs >= 60 * 60 * 1000;
+                const staleHours = Math.floor(staleMs / 3_600_000);
+                const staleMins  = Math.floor((staleMs % 3_600_000) / 60_000);
+                return (
                 <div
                   key={scan.id}
-                  className="border border-emerald-900/50 rounded-lg p-4 space-y-3 bg-emerald-950/20 hover:bg-emerald-950/30 transition-colors cursor-pointer"
+                  className="border border-emerald-500/30 rounded-lg p-4 space-y-3 bg-emerald-500/5 hover:bg-emerald-500/10 transition-colors cursor-pointer"
                   onClick={() => onScanSelected?.(scan.id)}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       {getStatusIcon(scan.status)}
                       <div>
-                        <div className="font-semibold text-white flex items-center gap-2 flex-wrap">
+                        <div className="font-semibold text-foreground flex items-center gap-2 flex-wrap">
                           <span>{scan.name}</span>
                           <WorkflowBadge name={scan.name} />
                         </div>
-                        <div className="text-sm text-slate-400">
+                        <div className="text-sm text-muted-foreground">
                           Module:{" "}
                           <span className="text-primary-400">
                             {scan.module}
@@ -443,7 +492,7 @@ export default function ActiveScans({
                         e.stopPropagation();
                         cancelScan(scan.id);
                       }}
-                      className="bg-red-900/80 hover:bg-red-800 border border-red-700 text-white-100"
+                      className="bg-red-900/80 hover:bg-red-800 border border-red-700 text-foreground"
                     >
                       <StopCircle className="h-4 w-4 mr-2" />
                       Cancel
@@ -464,11 +513,11 @@ export default function ActiveScans({
                           so far
                         </span>
                       )}
-                      <span className="text-slate-500 font-mono">
+                      <span className="text-muted-foreground font-mono">
                         {scan.progress ?? 0}%
                       </span>
                     </div>
-                    <div className="w-full bg-slate-700 rounded-full h-1">
+                    <div className="w-full bg-muted rounded-full h-1">
                       <div
                         className="bg-emerald-500 h-1 rounded transition-all duration-500"
                         style={{
@@ -476,6 +525,14 @@ export default function ActiveScans({
                         }}
                       />
                     </div>
+                    {isStale && (
+                      <div className="flex items-center gap-1.5 text-xs text-amber-400 pt-0.5">
+                        <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                        No new results for{" "}
+                        {staleHours > 0 ? `${staleHours}h ` : ""}
+                        {staleMins}m — scan may be stuck or the target isn't responding
+                      </div>
+                    )}
                   </div>
                   {/* Targets panel */}
                   <button
@@ -483,7 +540,7 @@ export default function ActiveScans({
                       e.stopPropagation();
                       fetchTargetList(scan.id);
                     }}
-                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors mt-1"
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mt-1"
                   >
                     <Target className="w-3 h-3" />
                     {expandedTargets[scan.id] !== undefined
@@ -496,13 +553,13 @@ export default function ActiveScans({
                     )}
                   </button>
                   {expandedTargets[scan.id] !== undefined && (
-                    <div className="mt-1 bg-dark-900/60 border border-slate-700 rounded p-2 max-h-40 overflow-y-auto">
+                    <div className="mt-1 bg-background/60 border border-border rounded p-2 max-h-40 overflow-y-auto">
                       {expandedTargets[scan.id] === null ? (
-                        <p className="text-xs text-slate-500 font-mono">
+                        <p className="text-xs text-muted-foreground font-mono">
                           Loading…
                         </p>
                       ) : expandedTargets[scan.id]!.length === 0 ? (
-                        <p className="text-xs text-slate-500 font-mono">
+                        <p className="text-xs text-muted-foreground font-mono">
                           No target list available
                         </p>
                       ) : (
@@ -510,7 +567,7 @@ export default function ActiveScans({
                           {expandedTargets[scan.id]!.map((t, i) => (
                             <li
                               key={i}
-                              className="text-xs font-mono text-cyan-300"
+                              className="text-xs font-mono text-foreground/80"
                             >
                               {t}
                             </li>
@@ -520,22 +577,23 @@ export default function ActiveScans({
                     </div>
                   )}
                 </div>
-              ))}
+              );
+              })}
             </div>
           </CardContent>
         </Card>
       )}
 
       {/* Scan History */}
-      <Card className="bg-slate-800 border-slate-700">
+      <Card className="bg-card border-border">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="flex items-center gap-2 text-white">
-                <Clock className="h-5 w-5 text-slate-400" />
+              <CardTitle className="flex items-center gap-2 text-foreground">
+                <Clock className="h-5 w-5 text-muted-foreground" />
                 Scan History
               </CardTitle>
-              <CardDescription className="text-slate-400">
+              <CardDescription className="text-muted-foreground">
                 Completed, failed, and cancelled scans
               </CardDescription>
             </div>
@@ -543,7 +601,7 @@ export default function ActiveScans({
               variant="outline"
               size="sm"
               onClick={fetchScans}
-              className="bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-700"
+              className="bg-background border-border text-foreground hover:bg-muted"
             >
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
@@ -552,30 +610,30 @@ export default function ActiveScans({
         </CardHeader>
         <CardContent>
           {completedScans.length === 0 ? (
-            <div className="text-center py-12 text-slate-500">
+            <div className="text-center py-12 text-muted-foreground">
               <Clock className="w-12 h-12 mx-auto mb-3 opacity-20" />
               <p>No scan history yet</p>
               <p className="text-sm mt-1">Completed scans will appear here</p>
             </div>
           ) : (
-            <div className="border border-slate-700 rounded-lg overflow-hidden">
+            <div className="border border-border rounded-lg overflow-hidden">
               <Table>
-                <TableHeader className="bg-slate-900/50">
-                  <TableRow className="border-slate-700 hover:bg-slate-900/50">
-                    <TableHead className="text-slate-400">Status</TableHead>
-                    <TableHead className="text-slate-400">Scan Name</TableHead>
-                    <TableHead className="text-slate-400">Module</TableHead>
-                    <TableHead className="text-slate-400">Results</TableHead>
-                    <TableHead className="text-slate-400">Targets</TableHead>
-                    <TableHead className="text-slate-400">Duration</TableHead>
-                    <TableHead className="text-slate-400">Started</TableHead>
+                <TableHeader className="bg-muted/50">
+                  <TableRow className="border-border hover:bg-muted/50">
+                    <TableHead className="text-muted-foreground">Status</TableHead>
+                    <TableHead className="text-muted-foreground">Scan Name</TableHead>
+                    <TableHead className="text-muted-foreground">Module</TableHead>
+                    <TableHead className="text-muted-foreground">Results</TableHead>
+                    <TableHead className="text-muted-foreground">Targets</TableHead>
+                    <TableHead className="text-muted-foreground">Duration</TableHead>
+                    <TableHead className="text-muted-foreground">Started</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {completedScans.map((scan) => (
                     <React.Fragment key={scan.id}>
                       <TableRow
-                        className="border-slate-700 hover:bg-slate-700/30 cursor-pointer transition-colors"
+                        className="border-border hover:bg-muted/30 cursor-pointer transition-colors"
                         onClick={() => onScanSelected?.(scan.id)}
                       >
                         <TableCell>
@@ -584,7 +642,7 @@ export default function ActiveScans({
                             {getStatusBadge(scan.status)}
                           </div>
                         </TableCell>
-                        <TableCell className="font-medium text-white">
+                        <TableCell className="font-medium text-foreground">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span>{scan.name}</span>
                             <WorkflowBadge name={scan.name} />
@@ -602,11 +660,11 @@ export default function ActiveScans({
                           )}
                         </TableCell>
                         <TableCell>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold font-mono bg-primary-500/20 border border-primary-500/40 text-white">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold font-mono bg-primary-500/20 border border-primary-500/40 text-foreground">
                             {scan.module}
                           </span>
                         </TableCell>
-                        <TableCell className="text-slate-300">
+                        <TableCell className="text-foreground">
                           <span
                             className={
                               (scan.results ?? 0) === 0
@@ -617,13 +675,13 @@ export default function ActiveScans({
                             {scan.results ?? 0}
                           </span>
                         </TableCell>
-                        <TableCell className="text-slate-300">
+                        <TableCell className="text-foreground">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               fetchTargetList(scan.id);
                             }}
-                            className="flex items-center gap-1 text-xs text-slate-400 hover:text-white transition-colors"
+                            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                             title="Show targets used for this scan"
                           >
                             <Target className="w-3 h-3" />
@@ -637,26 +695,26 @@ export default function ActiveScans({
                             )}
                           </button>
                         </TableCell>
-                        <TableCell className="text-slate-300">
+                        <TableCell className="text-foreground">
                           {scan.runtime ||
                             formatDuration(
                               getScanStartTime(scan),
                               scan.completedAt,
                             )}
                         </TableCell>
-                        <TableCell className="text-sm text-slate-400">
-                          {new Date(getScanStartTime(scan)).toLocaleString()}
+                        <TableCell className="text-sm text-muted-foreground">
+                          {parseScanDate(getScanStartTime(scan))?.toLocaleString() ?? getScanStartTime(scan)}
                         </TableCell>
                       </TableRow>
                       {expandedTargets[scan.id] !== undefined && (
-                        <TableRow className="border-slate-700 bg-slate-900/40 hover:bg-slate-900/40">
+                        <TableRow className="border-border bg-muted/20 hover:bg-muted/20">
                           <TableCell colSpan={7} className="py-2 px-4">
                             {expandedTargets[scan.id] === null ? (
-                              <p className="text-xs text-slate-500 font-mono">
+                              <p className="text-xs text-muted-foreground font-mono">
                                 Loading targets…
                               </p>
                             ) : expandedTargets[scan.id]!.length === 0 ? (
-                              <p className="text-xs text-slate-500 font-mono">
+                              <p className="text-xs text-muted-foreground font-mono">
                                 No target list available for this scan
                               </p>
                             ) : (
@@ -664,7 +722,7 @@ export default function ActiveScans({
                                 {expandedTargets[scan.id]!.map((t, i) => (
                                   <span
                                     key={i}
-                                    className="text-xs font-mono text-cyan-300 bg-dark-800 border border-dark-700 px-2 py-0.5 rounded"
+                                    className="text-xs font-mono text-foreground/80 bg-card border border-border px-2 py-0.5 rounded"
                                   >
                                     {t}
                                   </span>

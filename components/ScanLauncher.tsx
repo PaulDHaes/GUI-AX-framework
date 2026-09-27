@@ -314,13 +314,13 @@ export default function ScanLauncher({
   };
 
   return (
-    <Card className="bg-slate-800 border-slate-700">
+    <Card className="bg-card border-border">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-white">
+        <CardTitle className="flex items-center gap-2 text-foreground">
           <Rocket className="h-5 w-5 text-primary-400" />
           Launch Distributed Scan
         </CardTitle>
-        <CardDescription className="text-slate-400">
+        <CardDescription className="text-muted-foreground">
           Create and run large-scale distributed scans across your Axiom fleet.
           Configure targets, select a module, and customize scan parameters.
         </CardDescription>
@@ -329,7 +329,7 @@ export default function ScanLauncher({
         {error && (
           <Alert
             variant="destructive"
-            className="bg-red-950/50 border-red-900 text-white-300"
+            className="bg-red-950/50 border-red-900 text-foreground/80"
           >
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
@@ -347,16 +347,16 @@ export default function ScanLauncher({
         {/* Gowitness URL warning dialog */}
         {gowitnesWarn && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="bg-dark-800 border border-yellow-500/40 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+            <div className="bg-card border border-yellow-500/40 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
               <div className="flex items-start gap-3 mb-4">
                 <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
                 <div>
-                  <h3 className="text-sm font-bold text-white font-mono mb-1">
+                  <h3 className="text-sm font-bold text-foreground font-mono mb-1">
                     Gowitness requires full URLs
                   </h3>
-                  <p className="text-xs text-white-400">
+                  <p className="text-xs text-muted-foreground">
                     Gowitness needs targets in the form{" "}
-                    <code className="text-yellow-300 bg-dark-900 px-1 rounded">
+                    <code className="text-yellow-300 bg-background px-1 rounded">
                       https://example.com
                     </code>
                     . The following {gowitnesWarn.bare.length} target
@@ -367,15 +367,15 @@ export default function ScanLauncher({
                     {gowitnesWarn.bare.map((t) => (
                       <li
                         key={t}
-                        className="text-xs font-mono text-yellow-300 bg-dark-900 px-2 py-0.5 rounded"
+                        className="text-xs font-mono text-yellow-300 bg-background px-2 py-0.5 rounded"
                       >
                         {t}
                       </li>
                     ))}
                   </ul>
-                  <p className="text-xs text-white-500 mt-2">
+                  <p className="text-xs text-muted-foreground mt-2">
                     Auto-fix will prefix them with{" "}
-                    <code className="text-cyan-300 bg-dark-900 px-1 rounded">
+                    <code className="text-cyan-300 bg-background px-1 rounded">
                       https://
                     </code>{" "}
                     (port 443).
@@ -385,7 +385,7 @@ export default function ScanLauncher({
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => setGowitnesWarn(null)}
-                  className="px-3 py-1.5 text-xs rounded border border-dark-600 text-white-400 hover:text-white hover:border-dark-500 transition-colors font-mono"
+                  className="px-3 py-1.5 text-xs rounded border border-border text-muted-foreground hover:text-foreground hover:border-border transition-colors font-mono"
                 >
                   Go back &amp; fix
                 </button>
@@ -394,7 +394,7 @@ export default function ScanLauncher({
                     setGowitnesWarn(null);
                     doLaunchScan();
                   }}
-                  className="px-3 py-1.5 text-xs rounded border border-dark-600 text-white-500 hover:text-white transition-colors font-mono"
+                  className="px-3 py-1.5 text-xs rounded border border-border text-muted-foreground hover:text-foreground transition-colors font-mono"
                 >
                   Ignore &amp; launch anyway
                 </button>
@@ -417,7 +417,7 @@ export default function ScanLauncher({
                     setTargets(fixed);
                     setGowitnesWarn(null);
                   }}
-                  className="px-3 py-1.5 text-xs rounded bg-yellow-600 hover:bg-yellow-500 text-white font-mono transition-colors"
+                  className="px-3 py-1.5 text-xs rounded bg-yellow-600 hover:bg-yellow-500 text-foreground font-mono transition-colors"
                 >
                   Auto-fix with https://
                 </button>
@@ -429,14 +429,14 @@ export default function ScanLauncher({
         {/* Gowitness rm-when-done warning */}
         {gowitnesRmWarn && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="bg-dark-800 border border-orange-500/40 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+            <div className="bg-card border border-orange-500/40 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
               <div className="flex items-start gap-3 mb-4">
                 <AlertCircle className="w-5 h-5 text-orange-400 flex-shrink-0 mt-0.5" />
                 <div>
-                  <h3 className="text-sm font-bold text-white font-mono mb-1">
+                  <h3 className="text-sm font-bold text-foreground font-mono mb-1">
                     ⚠️ Keep instances alive for gowitness
                   </h3>
-                  <p className="text-xs text-white-400 leading-relaxed">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
                     <strong className="text-orange-300">
                       rm-when-done has been automatically disabled.
                     </strong>{" "}
@@ -444,7 +444,7 @@ export default function ScanLauncher({
                     instances. If instances are destroyed before the dashboard
                     downloads them, all screenshots will be lost.
                   </p>
-                  <p className="text-xs text-white-500 mt-2">
+                  <p className="text-xs text-muted-foreground mt-2">
                     After the scan finishes, use the{" "}
                     <span className="text-cyan-300 font-mono">Fleet</span> tab
                     to SSH in, download the results, then manually remove
@@ -455,7 +455,7 @@ export default function ScanLauncher({
               <div className="flex justify-end">
                 <button
                   onClick={() => setGowitnesRmWarn(false)}
-                  className="px-4 py-1.5 text-xs rounded bg-orange-700 hover:bg-orange-600 text-white font-mono transition-colors"
+                  className="px-4 py-1.5 text-xs rounded bg-orange-700 hover:bg-orange-600 text-foreground font-mono transition-colors"
                 >
                   Got it
                 </button>
@@ -464,13 +464,13 @@ export default function ScanLauncher({
           </div>
         )}
         {/* Provisioner / Image Filter */}
-        <div className="bg-dark-800/60 border border-dark-700 rounded-lg p-4 space-y-3">
+        <div className="bg-card/60 border border-border rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[13px] font-semibold text-white">
+              <p className="text-[13px] font-semibold text-foreground">
                 Fleet Image Filter
               </p>
-              <p className="text-[13px] text-dark-400 mt-0.5">
+              <p className="text-[13px] text-muted-foreground mt-0.5">
                 Modules not included in the selected image are greyed out in the
                 module picker.
               </p>
@@ -492,7 +492,7 @@ export default function ScanLauncher({
                 className={`px-3 py-1 rounded-lg text-[13px] font-medium border transition-colors ${
                   provisioner === p
                     ? "bg-primary-600/20 border-primary-500/50 text-primary-300"
-                    : "bg-dark-800 border-dark-700 text-dark-400 hover:text-white hover:border-dark-600"
+                    : "bg-card border-border text-muted-foreground hover:text-foreground hover:border-border"
                 }`}
               >
                 {p === "unknown" ? "All (no filter)" : PROVISIONER_LABELS[p]}
@@ -515,17 +515,17 @@ export default function ScanLauncher({
           </div>
         </div>
 
-        <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 space-y-6">
+        <div className="bg-card p-6 rounded-lg border border-border space-y-6">
           {/* Project Team (optional) */}
           <div>
-            <Label className="text-slate-300">
+            <Label className="text-foreground">
               Project Team{" "}
-              <span className="text-slate-500 font-normal">(optional)</span>
+              <span className="text-muted-foreground font-normal">(optional)</span>
             </Label>
             <select
               value={selectedTeamId}
               onChange={(e) => setSelectedTeamId(e.target.value)}
-              className="mt-1.5 w-full bg-slate-900 border border-slate-700 text-white rounded-md px-3 py-2 text-sm focus:outline-none focus:border-primary-500 font-mono"
+              className="mt-1.5 w-full bg-background border border-border text-foreground rounded-md px-3 py-2 text-sm focus:outline-none focus:border-primary-500 font-mono"
             >
               <option value="">— No team / personal scan —</option>
               {teams.map((t) => (
@@ -535,7 +535,7 @@ export default function ScanLauncher({
               ))}
             </select>
             {selectedTeamId && teams.find((t) => t.id === selectedTeamId) && (
-              <p className="text-xs text-slate-500 mt-1.5 font-mono">
+              <p className="text-xs text-muted-foreground mt-1.5 font-mono">
                 Scan will be prefixed:{" "}
                 <span className="text-primary-400">
                   {teams
@@ -551,7 +551,7 @@ export default function ScanLauncher({
 
           {/* Scan Name */}
           <div>
-            <Label htmlFor="scanName" className="text-slate-300">
+            <Label htmlFor="scanName" className="text-foreground">
               Scan Name <span className="text-red-400">*</span>
             </Label>
             <Input
@@ -559,9 +559,9 @@ export default function ScanLauncher({
               placeholder="e.g., acme-recon"
               value={scanName}
               onChange={(e) => setScanName(e.target.value)}
-              className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5"
+              className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5"
             />
-            <p className="text-xs text-slate-500 mt-1.5">
+            <p className="text-xs text-muted-foreground mt-1.5">
               {module.toLowerCase().includes("gowitness") ? (
                 <>
                   Output:{" "}
@@ -591,7 +591,7 @@ export default function ScanLauncher({
 
           {/* Targets */}
           <div>
-            <Label htmlFor="targets" className="text-slate-300">
+            <Label htmlFor="targets" className="text-foreground">
               Targets <span className="text-red-400">*</span>
             </Label>
             <div className="flex gap-2 mt-1.5 mb-2">
@@ -601,12 +601,12 @@ export default function ScanLauncher({
                 value={targets}
                 onChange={(e) => setTargets(e.target.value)}
                 rows={6}
-                className="flex-1 bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 font-mono text-sm"
+                className="flex-1 bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 font-mono text-sm"
               />
               <div className="flex flex-col gap-2">
                 <label
                   htmlFor="fileImport"
-                  className="cursor-pointer bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-slate-600"
+                  className="cursor-pointer bg-muted hover:bg-muted/70 text-foreground px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-border"
                 >
                   <Upload className="w-4 h-4" />
                   Import File
@@ -620,7 +620,7 @@ export default function ScanLauncher({
                 />
               </div>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-muted-foreground">
               One target per line (domains, IPs, CIDRs, URLs). Use "Import File"
               to load targets from a text file.
             </p>
@@ -628,7 +628,7 @@ export default function ScanLauncher({
 
           {/* Module */}
           <div>
-            <Label htmlFor="module" className="text-slate-300">
+            <Label htmlFor="module" className="text-foreground">
               Scan Module <span className="text-red-400">*</span>
             </Label>
             {modules.length > 0 ? (
@@ -649,11 +649,11 @@ export default function ScanLauncher({
                 >
                   <SelectTrigger
                     id="module"
-                    className="bg-slate-900 border-slate-700 text-white mt-1.5 hover:bg-slate-800 transition-colors"
+                    className="bg-background border-border text-foreground mt-1.5 hover:bg-muted transition-colors"
                   >
                     <SelectValue placeholder="Select scan module" />
                   </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-slate-700 text-white">
+                  <SelectContent className="bg-background border-border text-foreground">
                     {(() => {
                       const available = modules.filter((m) =>
                         isModuleAvailable(m, provisioner),
@@ -666,7 +666,7 @@ export default function ScanLauncher({
                           {available.length > 0 && (
                             <SelectGroup>
                               {provisioner !== "unknown" && (
-                                <SelectLabel className="text-dark-500 text-[13px] uppercase tracking-wider">
+                                <SelectLabel className="text-muted-foreground text-[13px] uppercase tracking-wider">
                                   Available —{" "}
                                   {PROVISIONER_LABELS[provisioner] ??
                                     provisioner}{" "}
@@ -682,7 +682,7 @@ export default function ScanLauncher({
                           )}
                           {unavailable.length > 0 && (
                             <SelectGroup>
-                              <SelectLabel className="text-dark-600 text-[13px] uppercase tracking-wider">
+                              <SelectLabel className="text-muted-foreground text-[13px] uppercase tracking-wider">
                                 Not in{" "}
                                 {PROVISIONER_LABELS[provisioner] ?? provisioner}{" "}
                                 image
@@ -697,7 +697,7 @@ export default function ScanLauncher({
                                   >
                                     {mod}
                                     {needed.length > 0 && (
-                                      <span className="ml-2 text-[13px] text-dark-500">
+                                      <span className="ml-2 text-[13px] text-muted-foreground">
                                         ({needed.join(" / ")})
                                       </span>
                                     )}
@@ -717,7 +717,7 @@ export default function ScanLauncher({
                       (m) => !isModuleAvailable(m, provisioner),
                     ).length;
                     return unavailCount > 0 ? (
-                      <p className="text-[13px] text-dark-500 mt-1.5 flex items-center gap-1">
+                      <p className="text-[13px] text-muted-foreground mt-1.5 flex items-center gap-1">
                         <span className="text-warn-400">{unavailCount}</span>{" "}
                         module{unavailCount !== 1 ? "s" : ""} greyed out — not
                         in{" "}
@@ -735,18 +735,18 @@ export default function ScanLauncher({
                   })()}
               </>
             ) : (
-              <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 mt-1.5 text-slate-500 text-sm">
+              <div className="bg-background border border-border rounded-lg px-3 py-2 mt-1.5 text-muted-foreground text-sm">
                 No modules found in ~/.axiom/modules
               </div>
             )}
-            <p className="text-xs text-slate-500 mt-1.5">
+            <p className="text-xs text-muted-foreground mt-1.5">
               Choose a scan module from your ~/.axiom/modules directory
             </p>
           </div>
 
           {/* Output File */}
           <div>
-            <Label htmlFor="outputFile" className="text-slate-300">
+            <Label htmlFor="outputFile" className="text-foreground">
               Output File <span className="text-red-400">*</span>
             </Label>
             <Input
@@ -754,18 +754,18 @@ export default function ScanLauncher({
               placeholder="results.txt"
               value={outputFile}
               onChange={(e) => setOutputFile(e.target.value)}
-              className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5"
+              className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5"
             />
-            <p className="text-xs text-slate-500 mt-1.5">
+            <p className="text-xs text-muted-foreground mt-1.5">
               Output filename (results will be merged from all instances)
             </p>
           </div>
 
-          <div className="border-t border-slate-700 pt-4">
-            <h3 className="text-sm font-semibold text-slate-300 mb-2">
+          <div className="border-t border-border pt-4">
+            <h3 className="text-sm font-semibold text-foreground mb-2">
               Fleet Control
             </h3>
-            <p className="text-xs text-slate-500 mb-4">
+            <p className="text-xs text-muted-foreground mb-4">
               Specify a fleet prefix to target existing instances, or use "Spin
               up instances" to create new ones. Configure regions, auto-destroy,
               and other fleet options below.
@@ -774,7 +774,7 @@ export default function ScanLauncher({
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="spinup" className="text-slate-300">
+                  <Label htmlFor="spinup" className="text-foreground">
                     Spin Up Instances
                   </Label>
                   <Input
@@ -785,9 +785,9 @@ export default function ScanLauncher({
                     placeholder="e.g., 50"
                     value={spinup}
                     onChange={(e) => setSpinup(e.target.value)}
-                    className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5"
+                    className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5"
                   />
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-muted-foreground mt-1">
                     Provision new instances for the scan (--spinup)
                   </p>
                   {spinup && parseInt(spinup) > 0 && (
@@ -797,7 +797,7 @@ export default function ScanLauncher({
                   )}
                 </div>
                 <div>
-                  <Label htmlFor="fleetPrefix" className="text-slate-300">
+                  <Label htmlFor="fleetPrefix" className="text-foreground">
                     Fleet Prefix
                   </Label>
                   <Input
@@ -805,9 +805,9 @@ export default function ScanLauncher({
                     placeholder="e.g., myfleet"
                     value={fleetPrefix}
                     onChange={(e) => setFleetPrefix(e.target.value)}
-                    className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5"
+                    className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5"
                   />
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-muted-foreground mt-1">
                     Use specific fleet prefix (--fleet, defaults to
                     selected.conf)
                   </p>
@@ -815,7 +815,7 @@ export default function ScanLauncher({
               </div>
 
               <div>
-                <Label htmlFor="regions" className="text-slate-300">
+                <Label htmlFor="regions" className="text-foreground">
                   Round-Robin Regions
                 </Label>
                 <Input
@@ -823,16 +823,16 @@ export default function ScanLauncher({
                   placeholder="us-east-1,eu-west-1,ap-southeast-1"
                   value={regions}
                   onChange={(e) => setRegions(e.target.value)}
-                  className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5 font-mono text-sm"
+                  className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5 font-mono text-sm"
                 />
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   Comma-separated regions for round-robin distribution
                   (--regions)
                 </p>
               </div>
 
               <div>
-                <Label htmlFor="customSsh" className="text-slate-300">
+                <Label htmlFor="customSsh" className="text-foreground">
                   Custom SSH Config
                 </Label>
                 <Input
@@ -840,9 +840,9 @@ export default function ScanLauncher({
                   placeholder="/path/to/custom/ssh/config"
                   value={customSsh}
                   onChange={(e) => setCustomSsh(e.target.value)}
-                  className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5 font-mono text-sm"
+                  className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5 font-mono text-sm"
                 />
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   Use custom SSH config file instead of default (--custom-ssh)
                 </p>
               </div>
@@ -900,7 +900,7 @@ export default function ScanLauncher({
                 />
                 <label
                   htmlFor="useCache"
-                  className="text-sm cursor-pointer text-slate-300"
+                  className="text-sm cursor-pointer text-foreground"
                 >
                   Use Cached SSH Config (--cache)
                 </label>
@@ -908,15 +908,15 @@ export default function ScanLauncher({
             </div>
           </div>
 
-          <div className="border-t border-slate-700 pt-4">
-            <h3 className="text-sm font-semibold text-slate-300 mb-4">
+          <div className="border-t border-border pt-4">
+            <h3 className="text-sm font-semibold text-foreground mb-4">
               Advanced Options
             </h3>
 
             <div className="space-y-4">
               {/* Optional: Wordlist */}
               <div>
-                <Label htmlFor="wordlist" className="text-slate-300">
+                <Label htmlFor="wordlist" className="text-foreground">
                   Remote Wordlist
                 </Label>
                 <Input
@@ -924,16 +924,16 @@ export default function ScanLauncher({
                   placeholder="/usr/share/wordlists/common.txt"
                   value={wordlist}
                   onChange={(e) => setWordlist(e.target.value)}
-                  className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5 font-mono text-sm"
+                  className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5 font-mono text-sm"
                 />
-                <p className="text-xs text-slate-500 mt-1.5">
+                <p className="text-xs text-muted-foreground mt-1.5">
                   Path to wordlist already on instances
                 </p>
               </div>
 
               {/* Optional: Local Wordlist Upload */}
               <div>
-                <Label htmlFor="localWordlist" className="text-slate-300">
+                <Label htmlFor="localWordlist" className="text-foreground">
                   Local Wordlist Upload
                 </Label>
                 <Input
@@ -941,16 +941,16 @@ export default function ScanLauncher({
                   placeholder="/path/to/local/wordlist.txt"
                   value={localWordlist}
                   onChange={(e) => setLocalWordlist(e.target.value)}
-                  className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5 font-mono text-sm"
+                  className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5 font-mono text-sm"
                 />
-                <p className="text-xs text-slate-500 mt-1.5">
+                <p className="text-xs text-muted-foreground mt-1.5">
                   Upload and distribute local wordlist across fleet (-wD)
                 </p>
               </div>
 
               {/* Optional: Local Folder */}
               <div>
-                <Label htmlFor="localFolder" className="text-slate-300">
+                <Label htmlFor="localFolder" className="text-foreground">
                   Local Folder Upload
                 </Label>
                 <Input
@@ -958,16 +958,16 @@ export default function ScanLauncher({
                   placeholder="/path/to/templates"
                   value={localFolder}
                   onChange={(e) => setLocalFolder(e.target.value)}
-                  className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5 font-mono text-sm"
+                  className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5 font-mono text-sm"
                 />
-                <p className="text-xs text-slate-500 mt-1.5">
+                <p className="text-xs text-muted-foreground mt-1.5">
                   Upload local folder to all instances (e.g., nuclei templates)
                 </p>
               </div>
 
               {/* Optional: Config File */}
               <div>
-                <Label htmlFor="localConfig" className="text-slate-300">
+                <Label htmlFor="localConfig" className="text-foreground">
                   Config File
                 </Label>
                 <Input
@@ -975,9 +975,9 @@ export default function ScanLauncher({
                   placeholder="/path/to/config.yaml"
                   value={localConfig}
                   onChange={(e) => setLocalConfig(e.target.value)}
-                  className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5 font-mono text-sm"
+                  className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5 font-mono text-sm"
                 />
-                <p className="text-xs text-slate-500 mt-1.5">
+                <p className="text-xs text-muted-foreground mt-1.5">
                   Upload config file to all instances
                 </p>
               </div>
@@ -985,7 +985,7 @@ export default function ScanLauncher({
               {/* Optional: Threads */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="threads" className="text-slate-300">
+                  <Label htmlFor="threads" className="text-foreground">
                     Threads
                   </Label>
                   <Input
@@ -994,14 +994,14 @@ export default function ScanLauncher({
                     placeholder="50"
                     value={threads}
                     onChange={(e) => setThreads(e.target.value)}
-                    className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5"
+                    className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5"
                   />
-                  <p className="text-xs text-slate-500 mt-1.5">
+                  <p className="text-xs text-muted-foreground mt-1.5">
                     Concurrent threads
                   </p>
                 </div>
                 <div>
-                  <Label htmlFor="maxRuntime" className="text-slate-300">
+                  <Label htmlFor="maxRuntime" className="text-foreground">
                     Max Runtime
                   </Label>
                   <Input
@@ -1009,9 +1009,9 @@ export default function ScanLauncher({
                     placeholder="2h or 30m"
                     value={maxRuntime}
                     onChange={(e) => setMaxRuntime(e.target.value)}
-                    className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5"
+                    className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5"
                   />
-                  <p className="text-xs text-slate-500 mt-1.5">
+                  <p className="text-xs text-muted-foreground mt-1.5">
                     Kill scan after timeout
                   </p>
                 </div>
@@ -1021,7 +1021,7 @@ export default function ScanLauncher({
 
           {/* Extra Args */}
           <div>
-            <Label htmlFor="extraArgs" className="text-slate-300">
+            <Label htmlFor="extraArgs" className="text-foreground">
               Extra Arguments
             </Label>
             <Input
@@ -1029,15 +1029,15 @@ export default function ScanLauncher({
               placeholder="-p- -sV -T4 --open"
               value={extraArgs}
               onChange={(e) => setExtraArgs(e.target.value)}
-              className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus:border-primary-500 mt-1.5 font-mono text-sm"
+              className="bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-primary-500 mt-1.5 font-mono text-sm"
             />
-            <p className="text-xs text-slate-500 mt-1.5">
+            <p className="text-xs text-muted-foreground mt-1.5">
               Additional arguments passed to the module
             </p>
           </div>
 
-          <div className="border-t border-slate-700 pt-4">
-            <h3 className="text-sm font-semibold text-slate-300 mb-4">
+          <div className="border-t border-border pt-4">
+            <h3 className="text-sm font-semibold text-foreground mb-4">
               Scan Flags
             </h3>
 
@@ -1051,7 +1051,7 @@ export default function ScanLauncher({
                 />
                 <label
                   htmlFor="dontShuffle"
-                  className="text-sm cursor-pointer text-slate-300"
+                  className="text-sm cursor-pointer text-foreground"
                 >
                   Don't shuffle targets
                 </label>
@@ -1065,7 +1065,7 @@ export default function ScanLauncher({
                 />
                 <label
                   htmlFor="dontSplit"
-                  className="text-sm cursor-pointer text-slate-300"
+                  className="text-sm cursor-pointer text-foreground"
                 >
                   Don't split inputs
                 </label>
@@ -1079,7 +1079,7 @@ export default function ScanLauncher({
                 />
                 <label
                   htmlFor="expandCidr"
-                  className="text-sm cursor-pointer text-slate-300"
+                  className="text-sm cursor-pointer text-foreground"
                 >
                   Expand CIDRs
                 </label>
@@ -1093,7 +1093,7 @@ export default function ScanLauncher({
                 />
                 <label
                   htmlFor="anew"
-                  className="text-sm cursor-pointer text-slate-300"
+                  className="text-sm cursor-pointer text-foreground"
                 >
                   Anew (deduplicate)
                 </label>
@@ -1107,7 +1107,7 @@ export default function ScanLauncher({
                 />
                 <label
                   htmlFor="quiet"
-                  className="text-sm cursor-pointer text-slate-300"
+                  className="text-sm cursor-pointer text-foreground"
                 >
                   Quiet mode
                 </label>
@@ -1121,7 +1121,7 @@ export default function ScanLauncher({
                 />
                 <label
                   htmlFor="unsafe"
-                  className="text-sm cursor-pointer text-slate-300"
+                  className="text-sm cursor-pointer text-foreground"
                 >
                   Unsafe mode
                 </label>
@@ -1132,7 +1132,7 @@ export default function ScanLauncher({
           <Button
             onClick={handleLaunchScan}
             disabled={launching}
-            className="w-full bg-primary-600 hover:bg-primary-700 text-white font-medium py-3"
+            className="w-full bg-primary-600 hover:bg-primary-700 text-foreground font-medium py-3"
           >
             <Rocket className="w-4 h-4 mr-2" />
             {launching ? "Launching Scan..." : "Launch Scan"}

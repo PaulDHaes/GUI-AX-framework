@@ -1,0 +1,7 @@
+[
+    {
+        "command": "msfconsole -q -x \"use auxiliary/scanner/http/http_version; set RHOSTS file:input; set THREADS 10; run; exit\" | tee output",
+        "ext": "txt",
+        "threads": "1"
+    }
+]
